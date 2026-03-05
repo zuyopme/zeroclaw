@@ -2,7 +2,7 @@
 
 Describe this PR in 2-5 bullets:
 
-- Base branch target (`main` by default; use `dev` only when maintainers explicitly request integration batching):
+- Base branch target (`dev` by default; `main` is for protected promotion flow from `dev`):
 - Problem:
 - Why it matters:
 - What changed:

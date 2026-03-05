@@ -17,7 +17,7 @@ Welcome — contributions of all sizes are valued. If this is your first contrib
    - Fork the repository and clone your fork
    - Create a feature branch (`git checkout -b fix/my-change`)
    - Make your changes and run `cargo fmt && cargo clippy && cargo test`
-   - Open a PR against `main` using the PR template (`dev` is used only when maintainers explicitly request integration batching)
+   - Open a PR against `dev` using the PR template (`main` is reserved for protected promotion flow)
    - If the issue already has an open PR, coordinate there first or mark your PR with `Supersedes #...` plus attribution when replacing it
 
 4. **Start with Track A.** ZeroClaw uses three [collaboration tracks](#collaboration-tracks-risk-based) (A/B/C) based on risk. First-time contributors should target **Track A** (docs, tests, chore) — these require lighter review and are the fastest path to a merged PR.
@@ -540,6 +540,7 @@ Recommended scope keys in commit titles:
 - No self-approval (GitHub enforced).
 - Require CODEOWNERS review for protected paths.
 - Merge only when the PR has no conflicts with the target branch.
+- Keep contributor PRs targeting `dev`; keep `main` protected and accept promotion PRs from `dev` only.
 - Use risk labels to determine review depth, scope labels (`core`, `provider`, `channel`, `security`, etc.) to route ownership, and module labels (`<module>:<component>`, e.g. `channel:telegram`, `provider:kimi`, `tool:shell`) to route subsystem expertise.
 - Contributor tier labels are auto-applied on PRs and issues by merged PR count: `experienced contributor` (>=10), `principal contributor` (>=20), `distinguished contributor` (>=50). Treat them as read-only automation labels; manual edits are auto-corrected.
 - Squash merge is disabled to preserve contributor attribution.

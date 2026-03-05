@@ -105,8 +105,8 @@ Maintain these branch protection rules on `dev` and `main`:
 - Dismiss stale approvals when new commits are pushed.
 - Keep `require_last_push_approval` disabled so one maintainer approval can satisfy merge policy.
 - Restrict force-push on protected branches.
-- Route normal contributor PRs to `main` by default (`dev` is optional for dedicated integration batching).
-- Allow direct merges to `main` once required checks and review policy pass.
+- Route normal contributor PRs to `dev` by default.
+- Keep `main` protected and accept promotion PRs from `dev` only after required checks and approvals pass.
 
 ---
 
@@ -115,7 +115,7 @@ Maintain these branch protection rules on `dev` and `main`:
 ### 4.1 Step A: Intake
 
 - Contributor opens PR with full `.github/pull_request_template.md`.
-- Normal contributor PR base is `main` by default; use `dev` only when maintainers explicitly request integration batching.
+- Normal contributor PR base is `dev` by default; reserve `main` for protected promotion PRs from `dev`.
 - If an issue already has open community PRs, reviewers/maintainers must acknowledge overlap and either continue that thread or document supersede rationale.
 - `PR Labeler` applies scope/path labels + size labels + risk labels + module labels (for example `channel:telegram`, `provider:kimi`, `tool:shell`) and contributor tiers by merged PR count (`trusted` >=5, `experienced` >=10, `principal` >=20, `distinguished` >=50), while de-duplicating less-specific scope labels when a more specific module label is present.
 - For all module prefixes, module labels are compacted to reduce noise: one specific module keeps `prefix:component`, but multiple specifics collapse to the base scope label `prefix`.
@@ -142,7 +142,7 @@ Maintain these branch protection rules on `dev` and `main`:
 
 - Keep **squash merge disabled** to preserve contributor commit attribution.
 - Prefer **merge commit** for normal contributor PRs.
-- Allow **rebase merge** when commits are already clean and linear history improves reviewability.
+- Allow **rebase merge** when commits are already clean and commit history remains easy to review.
 - Maintainer approval is required before merge, but approval should not rewrite or replace contributor authorship.
 - PR title should follow Conventional Commit style.
 - Merge only when rollback path is documented.
