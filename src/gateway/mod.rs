@@ -8,6 +8,7 @@
 //! - Header sanitization (handled by axum/hyper)
 
 pub mod api;
+pub mod api_control_plane;
 pub mod api_pairing;
 pub mod control_plane;
 pub mod nodes;
@@ -804,6 +805,11 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
             "/api/devices/{id}/token/rotate",
             post(api_pairing::rotate_token),
         )
+        // ── Control Plane API ──
+        .route("/api/control-plane/nodes", get(api_control_plane::list_nodes))
+        .route("/api/control-plane/nodes", post(api_control_plane::register_node))
+        .route("/api/control-plane/nodes/{id}/heartbeat", post(api_control_plane::node_heartbeat))
+        .route("/api/control-plane/nodes/{id}", delete(api_control_plane::deregister_node))
         // ── SSE event stream ──
         .route("/api/events", get(sse::handle_sse_events))
         // ── WebSocket agent chat ──
