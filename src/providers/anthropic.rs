@@ -151,6 +151,10 @@ struct AnthropicUsage {
     input_tokens: Option<u64>,
     #[serde(default)]
     output_tokens: Option<u64>,
+    #[serde(default)]
+    cache_creation_input_tokens: Option<u64>,
+    #[serde(default)]
+    cache_read_input_tokens: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -198,9 +202,38 @@ impl AnthropicProvider {
         if Self::is_setup_token(credential) {
             request
                 .header("Authorization", format!("Bearer {credential}"))
-                .header("anthropic-beta", "oauth-2025-04-20")
+                .header(
+                    "anthropic-beta",
+                    "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14",
+                )
+                .header("anthropic-dangerous-direct-browser-access", "true")
         } else {
             request.header("x-api-key", credential)
+        }
+    }
+
+    /// For OAuth tokens, Anthropic requires the system prompt to start with the
+    /// Claude Code identity prefix. This prepends it to any existing system prompt.
+    fn apply_oauth_system_prompt(system: Option<SystemPrompt>) -> Option<SystemPrompt> {
+        let prefix = SystemBlock {
+            block_type: "text".to_string(),
+            text: "You are Claude Code, Anthropic's official CLI for Claude.".to_string(),
+            cache_control: Some(CacheControl::ephemeral()),
+        };
+        match system {
+            Some(SystemPrompt::Blocks(mut blocks)) => {
+                blocks.insert(0, prefix);
+                Some(SystemPrompt::Blocks(blocks))
+            }
+            Some(SystemPrompt::String(s)) => Some(SystemPrompt::Blocks(vec![
+                prefix,
+                SystemBlock {
+                    block_type: "text".to_string(),
+                    text: s,
+                    cache_control: Some(CacheControl::ephemeral()),
+                },
+            ])),
+            None => Some(SystemPrompt::Blocks(vec![prefix])),
         }
     }
 
@@ -209,9 +242,9 @@ impl AnthropicProvider {
         text.len() > 3072
     }
 
-    /// Cache conversations with more than 4 messages (excluding system)
+    /// Cache conversations with more than 1 non-system message (i.e. after first exchange)
     fn should_cache_conversation(messages: &[ChatMessage]) -> bool {
-        messages.iter().filter(|m| m.role != "system").count() > 4
+        messages.iter().filter(|m| m.role != "system").count() > 1
     }
 
     /// Apply cache control to the last message content block
@@ -445,17 +478,13 @@ impl AnthropicProvider {
             }
         }
 
-        // Convert system text to SystemPrompt with cache control if large
+        // Always use Blocks format with cache_control for system prompts
         let system_prompt = system_text.map(|text| {
-            if Self::should_cache_system(&text) {
-                SystemPrompt::Blocks(vec![SystemBlock {
-                    block_type: "text".to_string(),
-                    text,
-                    cache_control: Some(CacheControl::ephemeral()),
-                }])
-            } else {
-                SystemPrompt::String(text)
-            }
+            SystemPrompt::Blocks(vec![SystemBlock {
+                block_type: "text".to_string(),
+                text,
+                cache_control: Some(CacheControl::ephemeral()),
+            }])
         });
 
         (system_prompt, native_messages)
@@ -477,6 +506,7 @@ impl AnthropicProvider {
         let usage = response.usage.map(|u| TokenUsage {
             input_tokens: u.input_tokens,
             output_tokens: u.output_tokens,
+            cached_input_tokens: u.cache_read_input_tokens,
         });
 
         for block in response.content {
@@ -538,15 +568,27 @@ impl Provider for AnthropicProvider {
             )
         })?;
 
-        let request = ChatRequest {
+        let system = system_prompt.map(|s| SystemPrompt::String(s.to_string()));
+        let system = if Self::is_setup_token(credential) {
+            Self::apply_oauth_system_prompt(system)
+        } else {
+            system
+        };
+
+        let request = NativeChatRequest {
             model: model.to_string(),
             max_tokens: 4096,
-            system: system_prompt.map(ToString::to_string),
-            messages: vec![Message {
+            system,
+            messages: vec![NativeMessage {
                 role: "user".to_string(),
-                content: message.to_string(),
+                content: vec![NativeContentOut::Text {
+                    text: message.to_string(),
+                    cache_control: None,
+                }],
             }],
             temperature,
+            tools: None,
+            tool_choice: None,
         };
 
         let mut request = self
@@ -564,8 +606,11 @@ impl Provider for AnthropicProvider {
             return Err(super::api_error("Anthropic", response).await);
         }
 
-        let chat_response: ChatResponse = response.json().await?;
-        Self::parse_text_response(chat_response)
+        let chat_response: NativeChatResponse = response.json().await?;
+        let parsed = Self::parse_native_response(chat_response);
+        parsed
+            .text
+            .ok_or_else(|| anyhow::anyhow!("No response from Anthropic"))
     }
 
     async fn chat(
@@ -599,6 +644,13 @@ impl Provider for AnthropicProvider {
         } else {
             None
         };
+
+        // For OAuth tokens, prepend Claude Code identity to system prompt
+        let system_prompt = if Self::is_setup_token(credential) {
+            Self::apply_oauth_system_prompt(system_prompt)
+        } else {
+            system_prompt
+        };
         let native_request = NativeChatRequest {
             model: model.to_string(),
             max_tokens: 4096,
@@ -629,6 +681,7 @@ impl Provider for AnthropicProvider {
         ProviderCapabilities {
             native_tool_calling: true,
             vision: true,
+            prompt_caching: true,
         }
     }
 
@@ -798,7 +851,14 @@ mod tests {
                 .headers()
                 .get("anthropic-beta")
                 .and_then(|v| v.to_str().ok()),
-            Some("oauth-2025-04-20")
+            Some("claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14")
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("anthropic-dangerous-direct-browser-access")
+                .and_then(|v| v.to_str().ok()),
+            Some("true")
         );
         assert!(request.headers().get("x-api-key").is_none());
     }
@@ -1072,12 +1132,8 @@ mod tests {
                 role: "user".to_string(),
                 content: "Hello".to_string(),
             },
-            ChatMessage {
-                role: "assistant".to_string(),
-                content: "Hi".to_string(),
-            },
         ];
-        // Only 2 non-system messages
+        // Only 1 non-system message — should not cache
         assert!(!AnthropicProvider::should_cache_conversation(&messages));
     }
 
@@ -1087,8 +1143,8 @@ mod tests {
             role: "system".to_string(),
             content: "System prompt".to_string(),
         }];
-        // Add 5 non-system messages
-        for i in 0..5 {
+        // Add 3 non-system messages
+        for i in 0..3 {
             messages.push(ChatMessage {
                 role: if i % 2 == 0 { "user" } else { "assistant" }.to_string(),
                 content: format!("Message {i}"),
@@ -1099,21 +1155,24 @@ mod tests {
 
     #[test]
     fn should_cache_conversation_boundary() {
-        let mut messages = vec![];
-        // Add exactly 4 non-system messages
-        for i in 0..4 {
-            messages.push(ChatMessage {
-                role: if i % 2 == 0 { "user" } else { "assistant" }.to_string(),
-                content: format!("Message {i}"),
-            });
-        }
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: "Hello".to_string(),
+        }];
+        // Exactly 1 non-system message — should not cache
         assert!(!AnthropicProvider::should_cache_conversation(&messages));
 
-        // Add one more to cross boundary
-        messages.push(ChatMessage {
-            role: "user".to_string(),
-            content: "One more".to_string(),
-        });
+        // Add one more to cross boundary (>1)
+        let messages = vec![
+            ChatMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+            },
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: "Hi".to_string(),
+            },
+        ];
         assert!(AnthropicProvider::should_cache_conversation(&messages));
     }
 
@@ -1226,7 +1285,7 @@ mod tests {
     }
 
     #[test]
-    fn convert_messages_small_system_prompt() {
+    fn convert_messages_small_system_prompt_uses_blocks_with_cache() {
         let messages = vec![ChatMessage {
             role: "system".to_string(),
             content: "Short system prompt".to_string(),
@@ -1235,10 +1294,17 @@ mod tests {
         let (system_prompt, _) = AnthropicProvider::convert_messages(&messages);
 
         match system_prompt.unwrap() {
-            SystemPrompt::String(s) => {
-                assert_eq!(s, "Short system prompt");
+            SystemPrompt::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 1);
+                assert_eq!(blocks[0].text, "Short system prompt");
+                assert!(
+                    blocks[0].cache_control.is_some(),
+                    "Small system prompts should have cache_control"
+                );
             }
-            SystemPrompt::Blocks(_) => panic!("Expected String variant for small prompt"),
+            SystemPrompt::String(_) => {
+                panic!("Expected Blocks variant with cache_control for small prompt")
+            }
         }
     }
 
@@ -1263,12 +1329,16 @@ mod tests {
     }
 
     #[test]
-    fn backward_compatibility_native_chat_request() {
-        // Test that requests without cache_control serialize identically to old format
+    fn native_chat_request_with_blocks_system() {
+        // System prompts now always use Blocks format with cache_control
         let req = NativeChatRequest {
             model: "claude-3-opus".to_string(),
             max_tokens: 4096,
-            system: Some(SystemPrompt::String("System".to_string())),
+            system: Some(SystemPrompt::Blocks(vec![SystemBlock {
+                block_type: "text".to_string(),
+                text: "System".to_string(),
+                cache_control: Some(CacheControl::ephemeral()),
+            }])),
             messages: vec![NativeMessage {
                 role: "user".to_string(),
                 content: vec![NativeContentOut::Text {
@@ -1282,8 +1352,11 @@ mod tests {
         };
 
         let json = serde_json::to_string(&req).unwrap();
-        assert!(!json.contains("cache_control"));
-        assert!(json.contains(r#""system":"System""#));
+        assert!(json.contains("System"));
+        assert!(
+            json.contains(r#""cache_control":{"type":"ephemeral"}"#),
+            "System prompt should include cache_control"
+        );
     }
 
     #[tokio::test]

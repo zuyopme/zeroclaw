@@ -746,7 +746,7 @@ impl Channel for MatrixChannel {
                     MessageType::Notice(content) => (content.body.clone(), None),
                     MessageType::Image(content) => {
                         let dl = media_info(&content.source, &content.body);
-                        (format!("[image: {}]", content.body), dl)
+                        (format!("[IMAGE:{}]", content.body), dl)
                     }
                     MessageType::File(content) => {
                         let dl = media_info(&content.source, &content.body);
@@ -783,7 +783,13 @@ impl Channel for MatrixChannel {
                     {
                         Ok(resp) if resp.status().is_success() => match resp.bytes().await {
                             Ok(bytes) => match tokio::fs::write(&dest, &bytes).await {
-                                Ok(()) => format!("{} — saved to {}", body, dest.display()),
+                                Ok(()) => {
+                                    if body.starts_with("[IMAGE:") {
+                                        format!("[IMAGE:{}]", dest.display())
+                                    } else {
+                                        format!("{} — saved to {}", body, dest.display())
+                                    }
+                                }
                                 Err(_) => format!("{} — failed to write to disk", body),
                             },
                             Err(_) => format!("{} — download failed", body),
@@ -888,12 +894,13 @@ impl Channel for MatrixChannel {
                     sender: sender.clone(),
                     reply_target: format!("{}||{}", sender, room.room_id()),
                     content: body,
-                    channel: format!("matrix:{}", room.room_id()),
+                    channel: "matrix".to_string(),
                     timestamp: std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs(),
-                    thread_ts,
+                    thread_ts: thread_ts.clone(),
+                    interruption_scope_id: thread_ts,
                 };
 
                 let _ = tx.send(msg).await;

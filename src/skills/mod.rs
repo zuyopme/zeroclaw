@@ -7,6 +7,8 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 mod audit;
+#[cfg(feature = "skill-creation")]
+pub mod creator;
 
 const OPEN_SKILLS_REPO_URL: &str = "https://github.com/besoeasy/open-skills";
 const OPEN_SKILLS_SYNC_MARKER: &str = ".zeroclaw-open-skills-sync";
@@ -67,13 +69,23 @@ struct SkillMeta {
     tags: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+struct SkillMarkdownMeta {
+    name: Option<String>,
+    description: Option<String>,
+    version: Option<String>,
+    author: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
 fn default_version() -> String {
     "0.1.0".to_string()
 }
 
 /// Load all skills from the workspace skills directory
 pub fn load_skills(workspace_dir: &Path) -> Vec<Skill> {
-    load_skills_with_open_skills_config(workspace_dir, None, None)
+    load_skills_with_open_skills_config(workspace_dir, None, None, None)
 }
 
 /// Load skills using runtime config values (preferred at runtime).
@@ -82,6 +94,21 @@ pub fn load_skills_with_config(workspace_dir: &Path, config: &crate::config::Con
         workspace_dir,
         Some(config.skills.open_skills_enabled),
         config.skills.open_skills_dir.as_deref(),
+        Some(config.skills.allow_scripts),
+    )
+}
+
+/// Load skills using explicit open-skills settings.
+pub fn load_skills_with_open_skills_settings(
+    workspace_dir: &Path,
+    open_skills_enabled: bool,
+    open_skills_dir: Option<&str>,
+) -> Vec<Skill> {
+    load_skills_with_open_skills_config(
+        workspace_dir,
+        Some(open_skills_enabled),
+        open_skills_dir,
+        None,
     )
 }
 
@@ -89,25 +116,27 @@ fn load_skills_with_open_skills_config(
     workspace_dir: &Path,
     config_open_skills_enabled: Option<bool>,
     config_open_skills_dir: Option<&str>,
+    config_allow_scripts: Option<bool>,
 ) -> Vec<Skill> {
     let mut skills = Vec::new();
+    let allow_scripts = config_allow_scripts.unwrap_or(false);
 
     if let Some(open_skills_dir) =
         ensure_open_skills_repo(config_open_skills_enabled, config_open_skills_dir)
     {
-        skills.extend(load_open_skills(&open_skills_dir));
+        skills.extend(load_open_skills(&open_skills_dir, allow_scripts));
     }
 
-    skills.extend(load_workspace_skills(workspace_dir));
+    skills.extend(load_workspace_skills(workspace_dir, allow_scripts));
     skills
 }
 
-fn load_workspace_skills(workspace_dir: &Path) -> Vec<Skill> {
+fn load_workspace_skills(workspace_dir: &Path, allow_scripts: bool) -> Vec<Skill> {
     let skills_dir = workspace_dir.join("skills");
-    load_skills_from_directory(&skills_dir)
+    load_skills_from_directory(&skills_dir, allow_scripts)
 }
 
-fn load_skills_from_directory(skills_dir: &Path) -> Vec<Skill> {
+fn load_skills_from_directory(skills_dir: &Path, allow_scripts: bool) -> Vec<Skill> {
     if !skills_dir.exists() {
         return Vec::new();
     }
@@ -124,7 +153,10 @@ fn load_skills_from_directory(skills_dir: &Path) -> Vec<Skill> {
             continue;
         }
 
-        match audit::audit_skill_directory(&path) {
+        match audit::audit_skill_directory_with_options(
+            &path,
+            audit::SkillAuditOptions { allow_scripts },
+        ) {
             Ok(report) if report.is_clean() => {}
             Ok(report) => {
                 tracing::warn!(
@@ -161,13 +193,79 @@ fn load_skills_from_directory(skills_dir: &Path) -> Vec<Skill> {
     skills
 }
 
-fn load_open_skills(repo_dir: &Path) -> Vec<Skill> {
+fn finalize_open_skill(mut skill: Skill) -> Skill {
+    if !skill.tags.iter().any(|tag| tag == "open-skills") {
+        skill.tags.push("open-skills".to_string());
+    }
+    if skill.author.is_none() {
+        skill.author = Some("besoeasy/open-skills".to_string());
+    }
+    skill
+}
+
+fn load_open_skills_from_directory(skills_dir: &Path, allow_scripts: bool) -> Vec<Skill> {
+    if !skills_dir.exists() {
+        return Vec::new();
+    }
+
+    let mut skills = Vec::new();
+
+    let Ok(entries) = std::fs::read_dir(skills_dir) else {
+        return skills;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        match audit::audit_skill_directory_with_options(
+            &path,
+            audit::SkillAuditOptions { allow_scripts },
+        ) {
+            Ok(report) if report.is_clean() => {}
+            Ok(report) => {
+                tracing::warn!(
+                    "skipping insecure open-skill directory {}: {}",
+                    path.display(),
+                    report.summary()
+                );
+                continue;
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "skipping unauditable open-skill directory {}: {err}",
+                    path.display()
+                );
+                continue;
+            }
+        }
+
+        let manifest_path = path.join("SKILL.toml");
+        let md_path = path.join("SKILL.md");
+
+        if manifest_path.exists() {
+            if let Ok(skill) = load_skill_toml(&manifest_path) {
+                skills.push(finalize_open_skill(skill));
+            }
+        } else if md_path.exists() {
+            if let Ok(skill) = load_open_skill_md(&md_path) {
+                skills.push(skill);
+            }
+        }
+    }
+
+    skills
+}
+
+fn load_open_skills(repo_dir: &Path, allow_scripts: bool) -> Vec<Skill> {
     // Modern open-skills layout stores skill packages in `skills/<name>/SKILL.md`.
     // Prefer that structure to avoid treating repository docs (e.g. CONTRIBUTING.md)
     // as executable skills.
     let nested_skills_dir = repo_dir.join("skills");
     if nested_skills_dir.is_dir() {
-        return load_skills_from_directory(&nested_skills_dir);
+        return load_open_skills_from_directory(&nested_skills_dir, allow_scripts);
     }
 
     let mut skills = Vec::new();
@@ -420,6 +518,7 @@ fn load_skill_toml(path: &Path) -> Result<Skill> {
 /// Load a skill from a SKILL.md file (simpler format)
 fn load_skill_md(path: &Path, dir: &Path) -> Result<Skill> {
     let content = std::fs::read_to_string(path)?;
+    let parsed = parse_skill_markdown(&content);
     let name = dir
         .file_name()
         .and_then(|n| n.to_str())
@@ -427,35 +526,90 @@ fn load_skill_md(path: &Path, dir: &Path) -> Result<Skill> {
         .to_string();
 
     Ok(Skill {
-        name,
-        description: extract_description(&content),
-        version: "0.1.0".to_string(),
-        author: None,
-        tags: Vec::new(),
+        name: parsed.meta.name.unwrap_or(name),
+        description: parsed
+            .meta
+            .description
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| extract_description(&parsed.body)),
+        version: parsed.meta.version.unwrap_or_else(default_version),
+        author: parsed.meta.author,
+        tags: parsed.meta.tags,
         tools: Vec::new(),
-        prompts: vec![content],
+        prompts: vec![parsed.body],
         location: Some(path.to_path_buf()),
     })
 }
 
 fn load_open_skill_md(path: &Path) -> Result<Skill> {
     let content = std::fs::read_to_string(path)?;
-    let name = path
+    let parsed = parse_skill_markdown(&content);
+    let file_stem = path
         .file_stem()
         .and_then(|n| n.to_str())
         .unwrap_or("open-skill")
         .to_string();
-
-    Ok(Skill {
-        name,
-        description: extract_description(&content),
-        version: "open-skills".to_string(),
-        author: Some("besoeasy/open-skills".to_string()),
-        tags: vec!["open-skills".to_string()],
+    let name = if file_stem.eq_ignore_ascii_case("skill") {
+        path.parent()
+            .and_then(|dir| dir.file_name())
+            .and_then(|name| name.to_str())
+            .unwrap_or(&file_stem)
+            .to_string()
+    } else {
+        file_stem
+    };
+    Ok(finalize_open_skill(Skill {
+        name: parsed.meta.name.unwrap_or(name),
+        description: parsed
+            .meta
+            .description
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| extract_description(&parsed.body)),
+        version: parsed
+            .meta
+            .version
+            .unwrap_or_else(|| "open-skills".to_string()),
+        author: parsed
+            .meta
+            .author
+            .or_else(|| Some("besoeasy/open-skills".to_string())),
+        tags: parsed.meta.tags,
         tools: Vec::new(),
-        prompts: vec![content],
+        prompts: vec![parsed.body],
         location: Some(path.to_path_buf()),
-    })
+    }))
+}
+
+struct ParsedSkillMarkdown {
+    meta: SkillMarkdownMeta,
+    body: String,
+}
+
+fn parse_skill_markdown(content: &str) -> ParsedSkillMarkdown {
+    if let Some((frontmatter, body)) = split_skill_frontmatter(content) {
+        if let Ok(meta) = serde_yaml::from_str::<SkillMarkdownMeta>(&frontmatter) {
+            return ParsedSkillMarkdown { meta, body };
+        }
+    }
+
+    ParsedSkillMarkdown {
+        meta: SkillMarkdownMeta::default(),
+        body: content.to_string(),
+    }
+}
+
+fn split_skill_frontmatter(content: &str) -> Option<(String, String)> {
+    let normalized = content.replace("\r\n", "\n");
+    let rest = normalized.strip_prefix("---\n")?;
+    if let Some(idx) = rest.find("\n---\n") {
+        let frontmatter = rest[..idx].to_string();
+        let body = rest[idx + 5..].to_string();
+        return Some((frontmatter, body));
+    }
+    if let Some(frontmatter) = rest.strip_suffix("\n---") {
+        return Some((frontmatter.to_string(), String::new()));
+    }
+    None
 }
 
 fn extract_description(content: &str) -> String {
@@ -543,7 +697,8 @@ pub fn skills_to_prompt_with_mode(
         crate::config::SkillsPromptInjectionMode::Compact => String::from(
             "## Available Skills\n\n\
              Skill summaries are preloaded below to keep context compact.\n\
-             Skill instructions are loaded on demand: read the skill file in `location` only when needed.\n\n\
+             Skill instructions are loaded on demand: call `read_skill(name)` with the skill's `<name>` when you need the full skill file.\n\
+             The `location` field is included for reference.\n\n\
              <available_skills>\n",
         ),
     };
@@ -559,26 +714,29 @@ pub fn skills_to_prompt_with_mode(
         );
         write_xml_text_element(&mut prompt, 4, "location", &location);
 
-        if matches!(mode, crate::config::SkillsPromptInjectionMode::Full) {
-            if !skill.prompts.is_empty() {
-                let _ = writeln!(prompt, "    <instructions>");
-                for instruction in &skill.prompts {
-                    write_xml_text_element(&mut prompt, 6, "instruction", instruction);
-                }
-                let _ = writeln!(prompt, "    </instructions>");
+        // In Full mode, inline both instructions and tools.
+        // In Compact mode, skip instructions (loaded on demand) but keep tools
+        // so the LLM knows which skill tools are available.
+        if matches!(mode, crate::config::SkillsPromptInjectionMode::Full)
+            && !skill.prompts.is_empty()
+        {
+            let _ = writeln!(prompt, "    <instructions>");
+            for instruction in &skill.prompts {
+                write_xml_text_element(&mut prompt, 6, "instruction", instruction);
             }
+            let _ = writeln!(prompt, "    </instructions>");
+        }
 
-            if !skill.tools.is_empty() {
-                let _ = writeln!(prompt, "    <tools>");
-                for tool in &skill.tools {
-                    let _ = writeln!(prompt, "      <tool>");
-                    write_xml_text_element(&mut prompt, 8, "name", &tool.name);
-                    write_xml_text_element(&mut prompt, 8, "description", &tool.description);
-                    write_xml_text_element(&mut prompt, 8, "kind", &tool.kind);
-                    let _ = writeln!(prompt, "      </tool>");
-                }
-                let _ = writeln!(prompt, "    </tools>");
+        if !skill.tools.is_empty() {
+            let _ = writeln!(prompt, "    <tools>");
+            for tool in &skill.tools {
+                let _ = writeln!(prompt, "      <tool>");
+                write_xml_text_element(&mut prompt, 8, "name", &tool.name);
+                write_xml_text_element(&mut prompt, 8, "description", &tool.description);
+                write_xml_text_element(&mut prompt, 8, "kind", &tool.kind);
+                let _ = writeln!(prompt, "      </tool>");
             }
+            let _ = writeln!(prompt, "    </tools>");
         }
 
         let _ = writeln!(prompt, "  </skill>");
@@ -620,6 +778,7 @@ pub fn init_skills_dir(workspace_dir: &Path) -> Result<()> {
              ```\n\n\
              ## SKILL.md format (simpler)\n\n\
              Just write a markdown file with instructions for the agent.\n\
+             Optional YAML frontmatter is supported for `name`, `description`, `version`, `author`, and `tags`.\n\
              The agent will read it and follow the instructions.\n\n\
              ## Installing community skills\n\n\
              ```bash\n\
@@ -632,7 +791,44 @@ pub fn init_skills_dir(workspace_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The ClawHub registry download API base URL.
+const CLAWHUB_DOWNLOAD_API: &str = "https://wry-manatee-359.convex.site/api/v1/download";
+
+/// Check if a source URL points to the ClawHub registry.
+fn is_clawhub_source(source: &str) -> bool {
+    let lower = source.to_ascii_lowercase();
+    lower.starts_with("https://clawhub.ai/") || lower.starts_with("http://clawhub.ai/")
+}
+
+/// Extract the skill slug from a ClawHub URL.
+///
+/// `https://clawhub.ai/steipete/summarize` → `"summarize"`
+/// `https://clawhub.ai/steipete/summarize/` → `"summarize"`
+fn clawhub_slug(source: &str) -> Option<&str> {
+    let rest = source
+        .strip_prefix("https://clawhub.ai/")
+        .or_else(|| source.strip_prefix("http://clawhub.ai/"))
+        .or_else(|| source.strip_prefix("https://CLAWHUB.AI/"))
+        .or_else(|| {
+            let lower = source.to_ascii_lowercase();
+            if lower.starts_with("https://clawhub.ai/") || lower.starts_with("http://clawhub.ai/") {
+                // Safe: the prefix length is fixed, works on the original source
+                let prefix_len = source.find("clawhub.ai/").unwrap() + "clawhub.ai/".len();
+                Some(&source[prefix_len..])
+            } else {
+                None
+            }
+        })?;
+    let rest = rest.trim_end_matches('/');
+    // Expected pattern: owner/skill-name — take the last segment
+    rest.rsplit('/').next().filter(|s| !s.is_empty())
+}
+
 fn is_git_source(source: &str) -> bool {
+    // ClawHub URLs look like https:// but are not git repos
+    if is_clawhub_source(source) {
+        return false;
+    }
     is_git_scheme_source(source, "https://")
         || is_git_scheme_source(source, "http://")
         || is_git_scheme_source(source, "ssh://")
@@ -709,8 +905,14 @@ fn detect_newly_installed_directory(
     }
 }
 
-fn enforce_skill_security_audit(skill_path: &Path) -> Result<audit::SkillAuditReport> {
-    let report = audit::audit_skill_directory(skill_path)?;
+fn enforce_skill_security_audit(
+    skill_path: &Path,
+    allow_scripts: bool,
+) -> Result<audit::SkillAuditReport> {
+    let report = audit::audit_skill_directory_with_options(
+        skill_path,
+        audit::SkillAuditOptions { allow_scripts },
+    )?;
     if report.is_clean() {
         return Ok(report);
     }
@@ -772,7 +974,11 @@ fn copy_dir_recursive_secure(src: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-fn install_local_skill_source(source: &str, skills_path: &Path) -> Result<(PathBuf, usize)> {
+fn install_local_skill_source(
+    source: &str,
+    skills_path: &Path,
+    allow_scripts: bool,
+) -> Result<(PathBuf, usize)> {
     let source_path = PathBuf::from(source);
     if !source_path.exists() {
         anyhow::bail!("Source path does not exist: {source}");
@@ -781,7 +987,7 @@ fn install_local_skill_source(source: &str, skills_path: &Path) -> Result<(PathB
     let source_path = source_path
         .canonicalize()
         .with_context(|| format!("failed to canonicalize source path {source}"))?;
-    let _ = enforce_skill_security_audit(&source_path)?;
+    let _ = enforce_skill_security_audit(&source_path, allow_scripts)?;
 
     let name = source_path
         .file_name()
@@ -796,7 +1002,7 @@ fn install_local_skill_source(source: &str, skills_path: &Path) -> Result<(PathB
         return Err(err);
     }
 
-    match enforce_skill_security_audit(&dest) {
+    match enforce_skill_security_audit(&dest, allow_scripts) {
         Ok(report) => Ok((dest, report.files_scanned)),
         Err(err) => {
             let _ = std::fs::remove_dir_all(&dest);
@@ -805,7 +1011,11 @@ fn install_local_skill_source(source: &str, skills_path: &Path) -> Result<(PathB
     }
 }
 
-fn install_git_skill_source(source: &str, skills_path: &Path) -> Result<(PathBuf, usize)> {
+fn install_git_skill_source(
+    source: &str,
+    skills_path: &Path,
+    allow_scripts: bool,
+) -> Result<(PathBuf, usize)> {
     let before = snapshot_skill_children(skills_path)?;
     let output = std::process::Command::new("git")
         .args(["clone", "--depth", "1", source])
@@ -818,10 +1028,74 @@ fn install_git_skill_source(source: &str, skills_path: &Path) -> Result<(PathBuf
 
     let installed_dir = detect_newly_installed_directory(skills_path, &before)?;
     remove_git_metadata(&installed_dir)?;
-    match enforce_skill_security_audit(&installed_dir) {
+    match enforce_skill_security_audit(&installed_dir, allow_scripts) {
         Ok(report) => Ok((installed_dir, report.files_scanned)),
         Err(err) => {
             let _ = std::fs::remove_dir_all(&installed_dir);
+            Err(err)
+        }
+    }
+}
+
+/// Download and install a skill from the ClawHub registry.
+///
+/// Fetches the skill ZIP from the ClawHub download API, extracts it into a
+/// subdirectory named after the slug, and runs the security audit.
+fn install_clawhub_skill_source(
+    source: &str,
+    skills_path: &Path,
+    allow_scripts: bool,
+) -> Result<(PathBuf, usize)> {
+    let slug = clawhub_slug(source).ok_or_else(|| {
+        anyhow::anyhow!("Could not extract skill name from ClawHub URL: {source}")
+    })?;
+
+    let url = format!("{CLAWHUB_DOWNLOAD_API}?slug={slug}");
+
+    // Download the ZIP to a temporary file
+    let response = reqwest::blocking::get(&url)
+        .with_context(|| format!("Failed to download skill from ClawHub: {url}"))?;
+
+    if !response.status().is_success() {
+        anyhow::bail!(
+            "ClawHub download failed (HTTP {}): {url}",
+            response.status()
+        );
+    }
+
+    let zip_bytes = response
+        .bytes()
+        .context("Failed to read ClawHub response body")?;
+
+    // Write ZIP to a temp file
+    let tmp_dir = tempfile::tempdir().context("Failed to create temp directory")?;
+    let zip_path = tmp_dir.path().join(format!("{slug}.zip"));
+    std::fs::write(&zip_path, &zip_bytes)
+        .with_context(|| format!("Failed to write temp zip: {}", zip_path.display()))?;
+
+    // Extract into the skills directory under the slug name
+    let dest = skills_path.join(slug);
+    std::fs::create_dir_all(&dest)
+        .with_context(|| format!("Failed to create skill directory: {}", dest.display()))?;
+
+    let output = std::process::Command::new("unzip")
+        .args(["-o", "-q"])
+        .arg(&zip_path)
+        .arg("-d")
+        .arg(&dest)
+        .output()
+        .context("Failed to run unzip — is it installed?")?;
+
+    if !output.status.success() {
+        let _ = std::fs::remove_dir_all(&dest);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Failed to extract ClawHub skill archive: {stderr}");
+    }
+
+    match enforce_skill_security_audit(&dest, allow_scripts) {
+        Ok(report) => Ok((dest, report.files_scanned)),
+        Err(err) => {
+            let _ = std::fs::remove_dir_all(&dest);
             Err(err)
         }
     }
@@ -882,7 +1156,12 @@ pub fn handle_command(command: crate::SkillCommands, config: &crate::config::Con
                 anyhow::bail!("Skill source or installed skill not found: {source}");
             }
 
-            let report = audit::audit_skill_directory(&target)?;
+            let report = audit::audit_skill_directory_with_options(
+                &target,
+                audit::SkillAuditOptions {
+                    allow_scripts: config.skills.allow_scripts,
+                },
+            )?;
             if report.is_clean() {
                 println!(
                     "  {} Skill audit passed for {} ({} files scanned).",
@@ -909,26 +1188,22 @@ pub fn handle_command(command: crate::SkillCommands, config: &crate::config::Con
             let skills_path = skills_dir(workspace_dir);
             std::fs::create_dir_all(&skills_path)?;
 
-            if is_git_source(&source) {
-                let (installed_dir, files_scanned) =
-                    install_git_skill_source(&source, &skills_path)
-                        .with_context(|| format!("failed to install git skill source: {source}"))?;
-                println!(
-                    "  {} Skill installed and audited: {} ({} files scanned)",
-                    console::style("✓").green().bold(),
-                    installed_dir.display(),
-                    files_scanned
-                );
+            let (installed_dir, files_scanned) = if is_clawhub_source(&source) {
+                install_clawhub_skill_source(&source, &skills_path, config.skills.allow_scripts)
+                    .with_context(|| format!("failed to install skill from ClawHub: {source}"))?
+            } else if is_git_source(&source) {
+                install_git_skill_source(&source, &skills_path, config.skills.allow_scripts)
+                    .with_context(|| format!("failed to install git skill source: {source}"))?
             } else {
-                let (dest, files_scanned) = install_local_skill_source(&source, &skills_path)
-                    .with_context(|| format!("failed to install local skill source: {source}"))?;
-                println!(
-                    "  {} Skill installed and audited: {} ({} files scanned)",
-                    console::style("✓").green().bold(),
-                    dest.display(),
-                    files_scanned
-                );
-            }
+                install_local_skill_source(&source, &skills_path, config.skills.allow_scripts)
+                    .with_context(|| format!("failed to install local skill source: {source}"))?
+            };
+            println!(
+                "  {} Skill installed and audited: {} ({} files scanned)",
+                console::style("✓").green().bold(),
+                installed_dir.display(),
+                files_scanned
+            );
 
             println!("  Security audit completed successfully.");
             Ok(())
@@ -1060,6 +1335,30 @@ command = "echo hello"
     }
 
     #[test]
+    fn load_skill_from_md_frontmatter_uses_metadata_and_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join("skills");
+        let skill_dir = skills_dir.join("md-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: pdf\ndescription: Use this skill for PDFs\nversion: 1.2.3\nauthor: maintainer\ntags:\n  - docs\n  - pdf\n---\n# PDF Processing Guide\nExtract text carefully.\n",
+        )
+        .unwrap();
+
+        let skills = load_skills(dir.path());
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "pdf");
+        assert_eq!(skills[0].description, "Use this skill for PDFs");
+        assert_eq!(skills[0].version, "1.2.3");
+        assert_eq!(skills[0].author.as_deref(), Some("maintainer"));
+        assert_eq!(skills[0].tags, vec!["docs", "pdf"]);
+        assert!(skills[0].prompts[0].contains("# PDF Processing Guide"));
+        assert!(!skills[0].prompts[0].contains("name: pdf"));
+    }
+
+    #[test]
     fn skills_to_prompt_empty() {
         let prompt = skills_to_prompt(&[], Path::new("/tmp"));
         assert!(prompt.is_empty());
@@ -1084,7 +1383,7 @@ command = "echo hello"
     }
 
     #[test]
-    fn skills_to_prompt_compact_mode_omits_instructions_and_tools() {
+    fn skills_to_prompt_compact_mode_omits_instructions_but_keeps_tools() {
         let skills = vec![Skill {
             name: "test".to_string(),
             description: "A test".to_string(),
@@ -1111,9 +1410,13 @@ command = "echo hello"
         assert!(prompt.contains("<name>test</name>"));
         assert!(prompt.contains("<location>skills/test/SKILL.md</location>"));
         assert!(prompt.contains("loaded on demand"));
+        assert!(prompt.contains("read_skill(name)"));
         assert!(!prompt.contains("<instructions>"));
         assert!(!prompt.contains("<instruction>Do the thing.</instruction>"));
-        assert!(!prompt.contains("<tools>"));
+        // Compact mode should still include tools so the LLM knows about them
+        assert!(prompt.contains("<tools>"));
+        assert!(prompt.contains("<name>run</name>"));
+        assert!(prompt.contains("<kind>shell</kind>"));
     }
 
     #[test]
@@ -1369,6 +1672,56 @@ description = "Bare minimum"
     }
 
     #[test]
+    fn clawhub_source_detected_and_excluded_from_git() {
+        let clawhub_urls = [
+            "https://clawhub.ai/steipete/summarize",
+            "https://clawhub.ai/steipete/summarize/",
+            "http://clawhub.ai/user/skill",
+        ];
+
+        for url in clawhub_urls {
+            assert!(
+                is_clawhub_source(url),
+                "expected clawhub detection for '{url}'"
+            );
+            assert!(
+                !is_git_source(url),
+                "clawhub URL should NOT be detected as git source: '{url}'"
+            );
+        }
+    }
+
+    #[test]
+    fn clawhub_slug_extracts_skill_name() {
+        assert_eq!(
+            clawhub_slug("https://clawhub.ai/steipete/summarize"),
+            Some("summarize")
+        );
+        assert_eq!(
+            clawhub_slug("https://clawhub.ai/steipete/summarize/"),
+            Some("summarize")
+        );
+        assert_eq!(
+            clawhub_slug("http://clawhub.ai/user/my-skill"),
+            Some("my-skill")
+        );
+        assert_eq!(clawhub_slug("https://clawhub.ai/"), None);
+        assert_eq!(clawhub_slug("https://github.com/owner/repo"), None);
+    }
+
+    #[test]
+    fn non_clawhub_https_urls_still_detected_as_git() {
+        let git_urls = [
+            "https://github.com/some-org/some-skill.git",
+            "https://gitlab.com/owner/repo",
+        ];
+        for url in git_urls {
+            assert!(!is_clawhub_source(url));
+            assert!(is_git_source(url));
+        }
+    }
+
+    #[test]
     fn skills_dir_path() {
         let base = std::path::Path::new("/home/user/.zeroclaw");
         let dir = skills_dir(base);
@@ -1470,6 +1823,43 @@ description = "Bare minimum"
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "http_request");
         assert_ne!(skills[0].name, "CONTRIBUTING");
+    }
+
+    #[test]
+    fn load_open_skill_md_frontmatter_uses_metadata_and_strips_block() {
+        let _env_guard = open_skills_env_lock().lock().unwrap();
+        let _enabled_guard = EnvVarGuard::unset("ZEROCLAW_OPEN_SKILLS_ENABLED");
+        let _dir_guard = EnvVarGuard::unset("ZEROCLAW_OPEN_SKILLS_DIR");
+
+        let dir = tempfile::tempdir().unwrap();
+        let workspace_dir = dir.path().join("workspace");
+        fs::create_dir_all(workspace_dir.join("skills")).unwrap();
+
+        let open_skills_dir = dir.path().join("open-skills-local");
+        fs::create_dir_all(open_skills_dir.join("skills/pdf")).unwrap();
+        fs::write(
+            open_skills_dir.join("skills/pdf/SKILL.md"),
+            "---\nname: pdf\ndescription: Use this skill whenever the user needs PDF help.\nauthor: community\ntags:\n  - parser\n---\n# PDF Guide\nInspect files safely.\n",
+        )
+        .unwrap();
+
+        let mut config = crate::config::Config::default();
+        config.workspace_dir = workspace_dir.clone();
+        config.skills.open_skills_enabled = true;
+        config.skills.open_skills_dir = Some(open_skills_dir.to_string_lossy().to_string());
+
+        let skills = load_skills_with_config(&workspace_dir, &config);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "pdf");
+        assert_eq!(
+            skills[0].description,
+            "Use this skill whenever the user needs PDF help."
+        );
+        assert_eq!(skills[0].author.as_deref(), Some("community"));
+        assert!(skills[0].tags.iter().any(|tag| tag == "parser"));
+        assert!(skills[0].tags.iter().any(|tag| tag == "open-skills"));
+        assert!(skills[0].prompts[0].contains("# PDF Guide"));
+        assert!(!skills[0].prompts[0].contains("description: Use this skill"));
     }
 }
 
