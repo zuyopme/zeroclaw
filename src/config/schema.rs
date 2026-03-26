@@ -1,6 +1,5 @@
 use crate::config::traits::ChannelConfig;
 use crate::providers::{is_glm_alias, is_zai_alias};
-use zeroclaw_macros::HasSecrets;
 use crate::security::{AutonomyLevel, DomainMatcher};
 use anyhow::{Context, Result};
 use directories::UserDirs;
@@ -13,6 +12,7 @@ use std::sync::{OnceLock, RwLock};
 use tokio::fs::File;
 use tokio::fs::{self, OpenOptions};
 use tokio::io::AsyncWriteExt;
+use zeroclaw_macros::HasSecrets;
 
 const SUPPORTED_PROXY_SERVICE_KEYS: &[&str] = &[
     "provider.anthropic",
@@ -15247,7 +15247,8 @@ auto_approve = ["file_read", "file_write", "file_edit", "memory_recall", "memory
             draft_update_interval_ms: 1500,
             multi_message_delay_ms: 800,
         };
-        mx.set_secret("channels.matrix.access-token", "new-token".into()).unwrap();
+        mx.set_secret("channels.matrix.access-token", "new-token".into())
+            .unwrap();
         assert_eq!(mx.access_token, "new-token");
     }
 
@@ -15266,7 +15267,9 @@ auto_approve = ["file_read", "file_write", "file_edit", "memory_recall", "memory
             draft_update_interval_ms: 1500,
             multi_message_delay_ms: 800,
         };
-        assert!(mx.set_secret("channels.matrix.nonexistent", "val".into()).is_err());
+        assert!(mx
+            .set_secret("channels.matrix.nonexistent", "val".into())
+            .is_err());
     }
 
     #[test]
@@ -15310,7 +15313,9 @@ auto_approve = ["file_read", "file_write", "file_edit", "memory_recall", "memory
             multi_message_delay_ms: 800,
         });
 
-        config.set_secret("channels.matrix.access-token", "new".into()).unwrap();
+        config
+            .set_secret("channels.matrix.access-token", "new".into())
+            .unwrap();
         assert_eq!(
             config.channels_config.matrix.as_ref().unwrap().access_token,
             "new"
@@ -15327,7 +15332,9 @@ auto_approve = ["file_read", "file_write", "file_edit", "memory_recall", "memory
     #[test]
     async fn config_set_secret_unknown_fails() {
         let mut config = Config::default();
-        assert!(config.set_secret("nonexistent.field", "val".into()).is_err());
+        assert!(config
+            .set_secret("nonexistent.field", "val".into())
+            .is_err());
     }
 
     #[test]
