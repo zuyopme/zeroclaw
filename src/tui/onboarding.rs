@@ -761,10 +761,7 @@ async fn find_docker_container() -> Option<String> {
 
 // ── Main loop ───────────────────────────────────────────────────────
 
-fn run_app(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
-) -> Result<()> {
+fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> Result<()> {
     loop {
         terminal.draw(|frame| render(frame, app))?;
 
@@ -2591,7 +2588,9 @@ fn render_control_ui(frame: &mut Frame, area: Rect, app: &App) {
     )));
     lines.push(Line::from(""));
 
-    let panel_height = u16::try_from(lines.len()).unwrap_or(u16::MAX).saturating_add(2); // +2 for border
+    let panel_height = u16::try_from(lines.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(2); // +2 for border
     let layout = Layout::vertical([
         Constraint::Length(2),
         Constraint::Length(panel_height),
