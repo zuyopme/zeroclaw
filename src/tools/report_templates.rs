@@ -124,8 +124,8 @@ fn load_template_file(locale: &str, search_dirs: &[PathBuf]) -> Option<TomlTempl
 
     for dir in search_dirs {
         let path = dir.join(&filename);
-        match std::fs::read_to_string(&path) {
-            Ok(contents) => match toml::from_str::<TomlTemplateFile>(&contents) {
+        if let Ok(contents) = std::fs::read_to_string(&path) {
+            match toml::from_str::<TomlTemplateFile>(&contents) {
                 Ok(parsed) => {
                     debug!(path = %path.display(), locale = locale, "loaded report template file");
                     return Some(parsed);
@@ -133,8 +133,7 @@ fn load_template_file(locale: &str, search_dirs: &[PathBuf]) -> Option<TomlTempl
                 Err(e) => {
                     debug!(path = %path.display(), error = %e, "failed to parse report template file");
                 }
-            },
-            Err(_) => {}
+            }
         }
     }
     None
@@ -217,40 +216,88 @@ fn hardcoded_english(template_name: &str) -> ReportTemplate {
         "weekly_status" => ReportTemplate {
             name: "Weekly Status".into(),
             sections: vec![
-                TemplateSection { heading: "Summary".into(), body: "Project: {{project_name}} | Period: {{period}}".into() },
-                TemplateSection { heading: "Completed".into(), body: "{{completed}}".into() },
-                TemplateSection { heading: "In Progress".into(), body: "{{in_progress}}".into() },
-                TemplateSection { heading: "Blocked".into(), body: "{{blocked}}".into() },
-                TemplateSection { heading: "Next Steps".into(), body: "{{next_steps}}".into() },
+                TemplateSection {
+                    heading: "Summary".into(),
+                    body: "Project: {{project_name}} | Period: {{period}}".into(),
+                },
+                TemplateSection {
+                    heading: "Completed".into(),
+                    body: "{{completed}}".into(),
+                },
+                TemplateSection {
+                    heading: "In Progress".into(),
+                    body: "{{in_progress}}".into(),
+                },
+                TemplateSection {
+                    heading: "Blocked".into(),
+                    body: "{{blocked}}".into(),
+                },
+                TemplateSection {
+                    heading: "Next Steps".into(),
+                    body: "{{next_steps}}".into(),
+                },
             ],
             format: ReportFormat::Markdown,
         },
         "sprint_review" => ReportTemplate {
             name: "Sprint Review".into(),
             sections: vec![
-                TemplateSection { heading: "Sprint".into(), body: "{{sprint_dates}}".into() },
-                TemplateSection { heading: "Completed".into(), body: "{{completed}}".into() },
-                TemplateSection { heading: "In Progress".into(), body: "{{in_progress}}".into() },
-                TemplateSection { heading: "Blocked".into(), body: "{{blocked}}".into() },
-                TemplateSection { heading: "Velocity".into(), body: "{{velocity}}".into() },
+                TemplateSection {
+                    heading: "Sprint".into(),
+                    body: "{{sprint_dates}}".into(),
+                },
+                TemplateSection {
+                    heading: "Completed".into(),
+                    body: "{{completed}}".into(),
+                },
+                TemplateSection {
+                    heading: "In Progress".into(),
+                    body: "{{in_progress}}".into(),
+                },
+                TemplateSection {
+                    heading: "Blocked".into(),
+                    body: "{{blocked}}".into(),
+                },
+                TemplateSection {
+                    heading: "Velocity".into(),
+                    body: "{{velocity}}".into(),
+                },
             ],
             format: ReportFormat::Markdown,
         },
         "risk_register" => ReportTemplate {
             name: "Risk Register".into(),
             sections: vec![
-                TemplateSection { heading: "Project".into(), body: "{{project_name}}".into() },
-                TemplateSection { heading: "Risks".into(), body: "{{risks}}".into() },
-                TemplateSection { heading: "Mitigations".into(), body: "{{mitigations}}".into() },
+                TemplateSection {
+                    heading: "Project".into(),
+                    body: "{{project_name}}".into(),
+                },
+                TemplateSection {
+                    heading: "Risks".into(),
+                    body: "{{risks}}".into(),
+                },
+                TemplateSection {
+                    heading: "Mitigations".into(),
+                    body: "{{mitigations}}".into(),
+                },
             ],
             format: ReportFormat::Markdown,
         },
         _ => ReportTemplate {
             name: "Milestone Report".into(),
             sections: vec![
-                TemplateSection { heading: "Project".into(), body: "{{project_name}}".into() },
-                TemplateSection { heading: "Milestones".into(), body: "{{milestones}}".into() },
-                TemplateSection { heading: "Status".into(), body: "{{status}}".into() },
+                TemplateSection {
+                    heading: "Project".into(),
+                    body: "{{project_name}}".into(),
+                },
+                TemplateSection {
+                    heading: "Milestones".into(),
+                    body: "{{milestones}}".into(),
+                },
+                TemplateSection {
+                    heading: "Status".into(),
+                    body: "{{status}}".into(),
+                },
             ],
             format: ReportFormat::Markdown,
         },
