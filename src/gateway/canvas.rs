@@ -18,6 +18,9 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 
+/// Subprotocol expected by the Canvas frontend (`web/src/pages/Canvas.tsx`).
+const WS_CANVAS_PROTOCOL: &str = "zeroclaw.v1";
+
 /// POST /api/canvas/:id request body.
 #[derive(Deserialize)]
 pub struct CanvasPostBody {
@@ -194,6 +197,18 @@ pub async fn handle_ws_canvas(
                 .into_response();
         }
     }
+
+    // Echo Sec-WebSocket-Protocol if the client requests our sub-protocol (RFC 6455 §4.2.2).
+    let ws = if headers
+        .get("sec-websocket-protocol")
+        .and_then(|v| v.to_str().ok())
+        .map_or(false, |protos| {
+            protos.split(',').any(|p| p.trim() == WS_CANVAS_PROTOCOL)
+        }) {
+        ws.protocols([WS_CANVAS_PROTOCOL])
+    } else {
+        ws
+    };
 
     ws.on_upgrade(move |socket| handle_canvas_socket(socket, state, id))
         .into_response()
