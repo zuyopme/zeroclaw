@@ -246,8 +246,6 @@ const MODELS: &[&str] = &[
 const SEARCH_PROVIDERS: &[(&str, &str)] = &[
     ("Brave Search", "API key required"),
     ("SearxNG", "Self-hosted, key-free"),
-    ("Tavily", "API key required"),
-    ("Google Custom Search", "API key required"),
     ("DuckDuckGo", "Key-free (limited)"),
     ("Skip for now", "configure later"),
 ];
@@ -1089,8 +1087,6 @@ fn apply_tui_selections_to_config(app: &App, config: &mut Config) {
         let search_id = match search {
             "Brave Search" => "brave",
             "SearxNG" => "searxng",
-            "Tavily" => "tavily",
-            "Google Custom Search" => "google",
             _ => "duckduckgo",
         };
         config.web_search.enabled = true;
@@ -1684,8 +1680,9 @@ fn handle_input(app: &mut App, key: KeyCode) {
             }
             KeyCode::Enter => {
                 // Skip API key for key-free providers and "Skip for now"
-                let needs_key = matches!(app.search_provider_idx, 0 | 2 | 3);
-                app.screen = if needs_key {
+                // Only Brave (0) needs an API key; SearxNG (1) needs instance URL
+                let needs_input = matches!(app.search_provider_idx, 0 | 1);
+                app.screen = if needs_input {
                     Screen::WebSearchApiKey
                 } else {
                     Screen::SkillsStatus
@@ -4420,7 +4417,7 @@ mod tests {
     #[test]
     fn save_web_search_duckduckgo() {
         let mut app = test_app();
-        app.search_provider_idx = 4; // DuckDuckGo
+        app.search_provider_idx = 2; // DuckDuckGo
         let mut config = Config::default();
         apply_tui_selections_to_config(&app, &mut config);
         assert!(config.web_search.enabled);
@@ -4428,18 +4425,9 @@ mod tests {
     }
 
     #[test]
-    fn save_web_search_tavily_maps_to_tavily() {
-        let mut app = test_app();
-        app.search_provider_idx = 2; // Tavily
-        let mut config = Config::default();
-        apply_tui_selections_to_config(&app, &mut config);
-        assert_eq!(config.web_search.provider, "tavily");
-    }
-
-    #[test]
     fn save_web_search_skip() {
         let mut app = test_app();
-        app.search_provider_idx = 5; // Skip for now
+        app.search_provider_idx = 3; // Skip for now
         let mut config = Config::default();
         let old_enabled = config.web_search.enabled;
         apply_tui_selections_to_config(&app, &mut config);
@@ -4593,7 +4581,7 @@ mod tests {
         let skip_idx = CHANNELS.iter().position(|c| c.0 == "Skip for now").unwrap();
         app.channel_idx = skip_idx;
         // Web search: Skip
-        app.search_provider_idx = 5;
+        app.search_provider_idx = 3;
         // Skills: Skip
         app.skills_idx = 0;
         // Hooks: Skip
@@ -4925,7 +4913,7 @@ mod tests {
         app.hardware_serial_port_input = "/dev/ttyUSB0".to_string();
         app.memory_backend_idx = 0; // SQLite
         app.memory_auto_save = true;
-        app.search_provider_idx = 4; // DuckDuckGo
+        app.search_provider_idx = 2; // DuckDuckGo
         app.hooks_idx = 0; // Enabled
 
         let mut config = Config::default();
