@@ -165,6 +165,9 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Launch the interactive setup wizard (TUI)
+    Setup,
+
     /// Initialize your workspace and configuration
     Onboard {
         /// Overwrite existing config without confirmation
@@ -862,6 +865,20 @@ async fn main() -> Result<()> {
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
+    // `zeroclaw setup` — single command that launches the TUI wizard directly.
+    if matches!(cli.command, Commands::Setup) {
+        Box::pin(tui::run_tui_onboarding()).await?;
+        let config = Box::pin(Config::load_or_init()).await?;
+        if config.gateway.require_pairing {
+            println!();
+            println!("  Pairing is enabled. A one-time pairing code will be");
+            println!("  displayed when the gateway starts.");
+            println!("  Dashboard: http://127.0.0.1:{}", config.gateway.port);
+            println!();
+        }
+        return Ok(());
+    }
+
     // Onboard auto-detects the environment: if stdin/stdout are a TTY and no
     // provider flags were given, it runs the full interactive wizard; otherwise
     // it runs the quick (scriptable) setup.  Use --quick to force quick setup,
@@ -1027,7 +1044,7 @@ async fn main() -> Result<()> {
     }
 
     match cli.command {
-        Commands::Onboard { .. } | Commands::Completions { .. } => unreachable!(),
+        Commands::Setup | Commands::Onboard { .. } | Commands::Completions { .. } => unreachable!(),
 
         Commands::Agent {
             message,
