@@ -1296,7 +1296,6 @@ fn strip_old_tool_context(ctx: &ChannelRuntimeContext, sender_key: &str, keep_tu
             i += 1;
         }
     }
-}
 
     // After stripping, ensure no orphaned tool messages remain.
     // A tool-role message without a preceding assistant with tool_calls
