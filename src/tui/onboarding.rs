@@ -75,7 +75,6 @@ enum Screen {
     HooksEnable,
     GatewayService,
     HealthCheck,
-    OptionalApps,
     ControlUI,
     WorkspaceBackup,
     FinalSecurity,
@@ -1786,13 +1785,6 @@ fn handle_input(app: &mut App, key: KeyCode) {
             _ => {}
         },
 
-        // OptionalApps skipped — macOS/iOS/Android apps not available yet
-        Screen::OptionalApps => match key {
-            KeyCode::Enter => app.screen = Screen::ControlUI,
-            KeyCode::Esc => app.screen = Screen::HealthCheck,
-            _ => {}
-        },
-
         Screen::ControlUI => match key {
             KeyCode::Enter => app.screen = Screen::WorkspaceBackup,
             KeyCode::Esc => app.screen = Screen::HealthCheck,
@@ -1993,7 +1985,6 @@ fn render(frame: &mut Frame, app: &App) {
         Screen::HooksEnable => render_hooks_enable(frame, content, app),
         Screen::GatewayService => render_gateway_service(frame, content, app),
         Screen::HealthCheck => render_health_check(frame, content, app),
-        Screen::OptionalApps => render_control_ui(frame, content, app), // skipped, redirect
         Screen::ControlUI => render_control_ui(frame, content, app),
         Screen::WorkspaceBackup => render_workspace_backup(frame, content),
         Screen::FinalSecurity => render_final_security(frame, content),
