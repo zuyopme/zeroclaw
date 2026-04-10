@@ -1,4 +1,3 @@
-use crate::security::pairing::PairingGuard;
 use anyhow::Context;
 use async_trait::async_trait;
 use directories::UserDirs;
@@ -11,6 +10,7 @@ use std::time::Duration;
 use tokio::fs;
 use zeroclaw_api::channel::{Channel, ChannelMessage, SendMessage};
 use zeroclaw_config::schema::{Config, StreamMode};
+use zeroclaw_runtime::security::pairing::PairingGuard;
 
 /// Telegram's maximum message length for text messages
 const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
@@ -607,7 +607,7 @@ impl TelegramChannel {
         text: &str,
         tts_config: &zeroclaw_config::schema::TtsConfig,
     ) -> anyhow::Result<()> {
-        let tts_manager = zeroclaw_channels::tts::TtsManager::new(tts_config)?;
+        let tts_manager = crate::tts::TtsManager::new(tts_config)?;
         let audio_bytes = tts_manager.synthesize(text).await?;
         let audio_len = audio_bytes.len();
         tracing::info!("Telegram TTS: synthesized {audio_len} bytes of audio");
@@ -4489,7 +4489,7 @@ mod tests {
             enabled: true,
             ..Default::default()
         };
-        let manager = crate::channels::transcription::TranscriptionManager::new(&config)
+        let manager = crate::transcription::TranscriptionManager::new(&config)
             .expect("TranscriptionManager::new should succeed with valid GROQ_API_KEY");
         let transcript: String = manager
             .transcribe(&audio_data, "hello.mp3")

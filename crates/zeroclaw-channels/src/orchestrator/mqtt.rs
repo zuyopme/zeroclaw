@@ -9,11 +9,11 @@ use anyhow::Result;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS, Transport};
 use tracing::{info, warn};
 
-use crate::sop::audit::SopAuditLogger;
-use crate::sop::dispatch::{dispatch_sop_event, process_headless_results};
-use crate::sop::engine::{SopEngine, now_iso8601};
-use crate::sop::types::{SopEvent, SopTriggerSource};
 use zeroclaw_config::schema::MqttConfig;
+use zeroclaw_runtime::sop::audit::SopAuditLogger;
+use zeroclaw_runtime::sop::dispatch::{dispatch_sop_event, process_headless_results};
+use zeroclaw_runtime::sop::engine::{SopEngine, now_iso8601};
+use zeroclaw_runtime::sop::types::{SopEvent, SopTriggerSource};
 
 /// Run the MQTT SOP listener loop.
 ///
@@ -57,7 +57,7 @@ pub async fn run_mqtt_sop_listener(
         info!("MQTT SOP listener: subscribed to '{topic}'");
     }
 
-    crate::health::mark_component_ok("mqtt");
+    zeroclaw_runtime::health::mark_component_ok("mqtt");
 
     loop {
         match eventloop.poll().await {
@@ -76,14 +76,14 @@ pub async fn run_mqtt_sop_listener(
                 process_headless_results(&results);
             }
             Ok(Event::Incoming(Packet::ConnAck(_))) => {
-                crate::health::mark_component_ok("mqtt");
+                zeroclaw_runtime::health::mark_component_ok("mqtt");
                 info!("MQTT SOP listener: connected to broker");
             }
             Ok(_) => {
                 // Other events (PingResp, SubAck, etc.) — ignore
             }
             Err(e) => {
-                crate::health::mark_component_error("mqtt", e.to_string());
+                zeroclaw_runtime::health::mark_component_error("mqtt", e.to_string());
                 warn!("MQTT SOP listener: connection error: {e}");
                 // rumqttc handles auto-reconnect; loop continues
             }

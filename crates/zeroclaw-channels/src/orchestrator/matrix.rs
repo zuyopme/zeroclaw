@@ -546,8 +546,8 @@ impl MatrixChannel {
                         && hinted != &whoami.user_id {
                             tracing::warn!(
                                 "Matrix configured user_id '{}' does not match whoami '{}'; using whoami.",
-                                crate::security::redact(hinted),
-                                crate::security::redact(&whoami.user_id)
+                                zeroclaw_runtime::security::redact(hinted),
+                                zeroclaw_runtime::security::redact(&whoami.user_id)
                             );
                         }
                     whoami.user_id.clone()
@@ -567,8 +567,8 @@ impl MatrixChannel {
                             if whoami_device_id != hinted {
                                 tracing::warn!(
                                     "Matrix configured device_id '{}' does not match whoami '{}'; using whoami.",
-                                    crate::security::redact(hinted),
-                                    crate::security::redact(whoami_device_id)
+                                    zeroclaw_runtime::security::redact(hinted),
+                                    zeroclaw_runtime::security::redact(whoami_device_id)
                                 );
                             }
                             whoami_device_id.clone()

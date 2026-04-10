@@ -23,65 +23,54 @@ pub mod mqtt;
 pub mod telegram;
 
 // Channel types imported directly from source crates (no shim files)
-pub use zeroclaw_api::channel::{Channel, ChannelMessage, SendMessage};
-pub use zeroclaw_channels::bluesky::BlueskyChannel;
-pub use zeroclaw_channels::clawdtalk::ClawdTalkChannel;
-pub use zeroclaw_channels::dingtalk::DingTalkChannel;
-pub use zeroclaw_channels::discord::DiscordChannel;
-pub use zeroclaw_channels::discord_history::DiscordHistoryChannel;
+pub use crate::bluesky::BlueskyChannel;
+pub use crate::clawdtalk::ClawdTalkChannel;
+pub use crate::dingtalk::DingTalkChannel;
+pub use crate::discord::DiscordChannel;
+pub use crate::discord_history::DiscordHistoryChannel;
 #[cfg(feature = "channel-email")]
-pub use zeroclaw_channels::email_channel::EmailChannel;
+pub use crate::email_channel::EmailChannel;
 #[cfg(feature = "channel-email")]
-pub use zeroclaw_channels::gmail_push::GmailPushChannel;
-pub use zeroclaw_channels::imessage::IMessageChannel;
-pub use zeroclaw_channels::irc::IrcChannel;
+pub use crate::gmail_push::GmailPushChannel;
+pub use crate::imessage::IMessageChannel;
+pub use crate::irc::IrcChannel;
 #[cfg(feature = "channel-lark")]
-pub use zeroclaw_channels::lark::LarkChannel;
-pub use zeroclaw_channels::linq::LinqChannel;
-pub use zeroclaw_channels::mattermost::MattermostChannel;
-pub use zeroclaw_channels::mochat::MochatChannel;
-pub use zeroclaw_channels::nextcloud_talk::NextcloudTalkChannel;
+pub use crate::lark::LarkChannel;
+pub use crate::linq::LinqChannel;
+pub use crate::mattermost::MattermostChannel;
+pub use crate::mochat::MochatChannel;
+pub use crate::nextcloud_talk::NextcloudTalkChannel;
 #[cfg(feature = "channel-nostr")]
-pub use zeroclaw_channels::nostr::NostrChannel;
-pub use zeroclaw_channels::notion::NotionChannel;
-pub use zeroclaw_channels::qq::QQChannel;
-pub use zeroclaw_channels::reddit::RedditChannel;
-pub use zeroclaw_channels::signal::SignalChannel;
-pub use zeroclaw_channels::slack::SlackChannel;
-pub use zeroclaw_channels::transcription;
-pub use zeroclaw_channels::tts::{TtsManager, TtsProvider};
-pub use zeroclaw_channels::twitter::TwitterChannel;
-pub use zeroclaw_channels::voice_call::VoiceCallChannel;
+pub use crate::nostr::NostrChannel;
+pub use crate::notion::NotionChannel;
+pub use crate::qq::QQChannel;
+pub use crate::reddit::RedditChannel;
+pub use crate::signal::SignalChannel;
+pub use crate::slack::SlackChannel;
+pub use crate::transcription;
+pub use crate::tts::{TtsManager, TtsProvider};
+pub use crate::twitter::TwitterChannel;
+pub use crate::voice_call::VoiceCallChannel;
 #[cfg(feature = "voice-wake")]
-pub use zeroclaw_channels::voice_wake::VoiceWakeChannel;
-pub use zeroclaw_channels::wati::WatiChannel;
-pub use zeroclaw_channels::webhook::WebhookChannel;
-pub use zeroclaw_channels::wecom::WeComChannel;
-pub use zeroclaw_channels::whatsapp::WhatsAppChannel;
+pub use crate::voice_wake::VoiceWakeChannel;
+pub use crate::wati::WatiChannel;
+pub use crate::webhook::WebhookChannel;
+pub use crate::wecom::WeComChannel;
+pub use crate::whatsapp::WhatsAppChannel;
+pub use zeroclaw_api::channel::{Channel, ChannelMessage, SendMessage};
 // Local channel types (in misc, not zeroclaw-channels)
+pub use crate::link_enricher;
+#[cfg(feature = "whatsapp-web")]
+pub use crate::whatsapp_web::WhatsAppWebChannel;
 pub use cli::CliChannel;
 #[cfg(feature = "channel-matrix")]
 pub use matrix::MatrixChannel;
 pub use telegram::TelegramChannel;
-pub use zeroclaw_channels::link_enricher;
-#[cfg(feature = "whatsapp-web")]
-pub use zeroclaw_channels::whatsapp_web::WhatsAppWebChannel;
 pub use zeroclaw_infra::debounce::MessageDebouncer;
 pub use zeroclaw_infra::session_backend::SessionBackend;
 pub use zeroclaw_infra::session_sqlite::SqliteSessionBackend;
 pub use zeroclaw_infra::stall_watchdog::StallWatchdog;
 
-use crate::agent::loop_::{
-    build_tool_instructions, clear_model_switch_request, get_model_switch_state,
-    is_model_switch_requested, run_tool_call_loop, scope_thread_id, scrub_credentials,
-};
-use crate::approval::ApprovalManager;
-use crate::observability::traits::{ObserverEvent, ObserverMetric};
-use crate::observability::{self, Observer, runtime_trace};
-use crate::platform;
-use crate::security::{AutonomyLevel, SecurityPolicy};
-use crate::tools::{self, Tool};
-use crate::util::truncate_with_ellipsis;
 use anyhow::{Context, Result};
 use portable_atomic::{AtomicU64, Ordering};
 use serde::Deserialize;
@@ -97,6 +86,17 @@ use zeroclaw_config::schema::Config;
 use zeroclaw_memory::{self, Memory};
 use zeroclaw_providers::reliable::{scope_provider_fallback, take_last_provider_fallback};
 use zeroclaw_providers::{self, ChatMessage, Provider};
+use zeroclaw_runtime::agent::loop_::{
+    build_tool_instructions, clear_model_switch_request, get_model_switch_state,
+    is_model_switch_requested, run_tool_call_loop, scope_thread_id, scrub_credentials,
+};
+use zeroclaw_runtime::approval::ApprovalManager;
+use zeroclaw_runtime::observability::traits::{ObserverEvent, ObserverMetric};
+use zeroclaw_runtime::observability::{self, Observer, runtime_trace};
+use zeroclaw_runtime::platform;
+use zeroclaw_runtime::security::{AutonomyLevel, SecurityPolicy};
+use zeroclaw_runtime::tools::{self, Tool};
+use zeroclaw_runtime::util::truncate_with_ellipsis;
 
 /// Observer wrapper that forwards tool-call events to a channel sender
 /// for real-time threaded notifications.
@@ -164,9 +164,9 @@ const MAX_CHANNEL_HISTORY: usize = 50;
 /// reducing noise in memory recall.
 const AUTOSAVE_MIN_MESSAGE_CHARS: usize = 20;
 
-// System prompt functions live in `crate::agent::system_prompt`.
+// System prompt functions live in `zeroclaw_runtime::agent::system_prompt`.
 #[allow(unused_imports)]
-pub use crate::agent::system_prompt::{
+pub use zeroclaw_runtime::agent::system_prompt::{
     BOOTSTRAP_MAX_CHARS, build_system_prompt, build_system_prompt_with_mode,
     build_system_prompt_with_mode_and_autonomy,
 };
@@ -319,7 +319,7 @@ impl InterruptOnNewMessageConfig {
 
 #[derive(Clone)]
 struct ChannelCostTrackingState {
-    tracker: Arc<crate::cost::CostTracker>,
+    tracker: Arc<zeroclaw_runtime::cost::CostTracker>,
     prices: Arc<HashMap<String, zeroclaw_config::schema::ModelPricing>>,
 }
 
@@ -352,7 +352,7 @@ struct ChannelRuntimeContext {
     multimodal: zeroclaw_config::schema::MultimodalConfig,
     media_pipeline: zeroclaw_config::schema::MediaPipelineConfig,
     transcription_config: zeroclaw_config::schema::TranscriptionConfig,
-    hooks: Option<Arc<crate::hooks::HookRunner>>,
+    hooks: Option<Arc<zeroclaw_runtime::hooks::HookRunner>>,
     non_cli_excluded_tools: Arc<Vec<String>>,
     autonomy_level: AutonomyLevel,
     tool_call_dedup_exempt: Arc<Vec<String>>,
@@ -366,7 +366,8 @@ struct ChannelRuntimeContext {
     /// `[autonomy]` config; auto-denies tools that would need interactive
     /// approval since no operator is present on channel runs.
     approval_manager: Arc<ApprovalManager>,
-    activated_tools: Option<std::sync::Arc<std::sync::Mutex<crate::tools::ActivatedToolSet>>>,
+    activated_tools:
+        Option<std::sync::Arc<std::sync::Mutex<zeroclaw_runtime::tools::ActivatedToolSet>>>,
     cost_tracking: Option<ChannelCostTrackingState>,
     pacing: zeroclaw_config::schema::PacingConfig,
     max_tool_result_chars: usize,
@@ -864,12 +865,12 @@ async fn config_file_stamp(path: &Path) -> Option<ConfigFileStamp> {
 }
 
 fn decrypt_optional_secret_for_runtime_reload(
-    store: &crate::security::SecretStore,
+    store: &zeroclaw_runtime::security::SecretStore,
     value: &mut Option<String>,
     field_name: &str,
 ) -> Result<()> {
     if let Some(raw) = value.clone()
-        && crate::security::SecretStore::is_encrypted(&raw)
+        && zeroclaw_runtime::security::SecretStore::is_encrypted(&raw)
     {
         *value = Some(
             store
@@ -889,7 +890,8 @@ async fn load_runtime_defaults_from_config_file(path: &Path) -> Result<ChannelRu
     parsed.config_path = path.to_path_buf();
 
     if let Some(zeroclaw_dir) = path.parent() {
-        let store = crate::security::SecretStore::new(zeroclaw_dir, parsed.secrets.encrypt);
+        let store =
+            zeroclaw_runtime::security::SecretStore::new(zeroclaw_dir, parsed.secrets.encrypt);
         decrypt_optional_secret_for_runtime_reload(&store, &mut parsed.api_key, "config.api_key")?;
         // Decrypt TTS provider API keys for runtime reload
         if let Some(ref mut openai) = parsed.tts.openai {
@@ -1093,8 +1095,8 @@ fn replace_available_skills_section(base_prompt: &str, refreshed_skills: &str) -
 }
 
 fn refreshed_new_session_system_prompt(ctx: &ChannelRuntimeContext) -> String {
-    let refreshed_skills = crate::skills::skills_to_prompt_with_mode(
-        &crate::skills::load_skills_with_config(
+    let refreshed_skills = zeroclaw_runtime::skills::skills_to_prompt_with_mode(
+        &zeroclaw_runtime::skills::load_skills_with_config(
             ctx.workspace_dir.as_ref(),
             ctx.prompt_config.as_ref(),
         ),
@@ -2085,9 +2087,9 @@ fn sanitize_channel_response(response: &str, tools: &[Box<dyn Tool>]) -> String 
     let sanitized = strip_tool_narration(&stripped_json);
 
     // Scan for credential leaks before returning to caller
-    match crate::security::LeakDetector::new().scan(&sanitized) {
-        crate::security::LeakResult::Clean => sanitized,
-        crate::security::LeakResult::Detected { patterns, redacted } => {
+    match zeroclaw_runtime::security::LeakDetector::new().scan(&sanitized) {
+        zeroclaw_runtime::security::LeakResult::Clean => sanitized,
+        zeroclaw_runtime::security::LeakResult::Detected { patterns, redacted } => {
             tracing::warn!(
                 patterns = ?patterns,
                 "output guardrail: credential leak detected in outbound channel response"
@@ -2339,7 +2341,7 @@ fn spawn_supervised_listener_with_health_interval(
         let max_backoff = max_backoff_secs.max(backoff);
 
         loop {
-            crate::health::mark_component_ok(&component);
+            zeroclaw_runtime::health::mark_component_ok(&component);
             let mut health = tokio::time::interval(health_interval);
             health.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let result = {
@@ -2349,7 +2351,7 @@ fn spawn_supervised_listener_with_health_interval(
                 loop {
                     tokio::select! {
                         _ = health.tick() => {
-                            crate::health::mark_component_ok(&component);
+                            zeroclaw_runtime::health::mark_component_ok(&component);
                         }
                         result = &mut listen_future => break result,
                     }
@@ -2363,17 +2365,20 @@ fn spawn_supervised_listener_with_health_interval(
             match result {
                 Ok(()) => {
                     tracing::warn!("Channel {} exited unexpectedly; restarting", ch.name());
-                    crate::health::mark_component_error(&component, "listener exited unexpectedly");
+                    zeroclaw_runtime::health::mark_component_error(
+                        &component,
+                        "listener exited unexpectedly",
+                    );
                     // Clean exit — reset backoff since the listener ran successfully
                     backoff = initial_backoff_secs.max(1);
                 }
                 Err(e) => {
                     tracing::error!("Channel {} error: {e}; restarting", ch.name());
-                    crate::health::mark_component_error(&component, e.to_string());
+                    zeroclaw_runtime::health::mark_component_error(&component, e.to_string());
                 }
             }
 
-            crate::health::bump_component_restart(&component);
+            zeroclaw_runtime::health::bump_component_restart(&component);
             tokio::time::sleep(Duration::from_secs(backoff)).await;
             // Double backoff AFTER sleeping so first error uses initial_backoff
             backoff = backoff.saturating_mul(2).min(max_backoff);
@@ -2458,11 +2463,11 @@ async fn process_channel_message(
     // ── Hook: on_message_received (modifying) ────────────
     let mut msg = if let Some(hooks) = &ctx.hooks {
         match hooks.run_on_message_received(msg).await {
-            crate::hooks::HookResult::Cancel(reason) => {
+            zeroclaw_runtime::hooks::HookResult::Cancel(reason) => {
                 tracing::info!(%reason, "incoming message dropped by hook");
                 return;
             }
-            crate::hooks::HookResult::Continue(modified) => modified,
+            zeroclaw_runtime::hooks::HookResult::Continue(modified) => modified,
         }
     } else {
         msg
@@ -2520,7 +2525,8 @@ async fn process_channel_message(
     let mut route = get_route_selection(ctx.as_ref(), &history_key);
 
     // ── Query classification: override route when a rule matches ──
-    if let Some(hint) = crate::agent::classifier::classify(&ctx.query_classification, &msg.content)
+    if let Some(hint) =
+        zeroclaw_runtime::agent::classifier::classify(&ctx.query_classification, &msg.content)
         && let Some(matched_route) = ctx
             .model_routes
             .iter()
@@ -2743,7 +2749,7 @@ async fn process_channel_message(
     // and preserving key decisions through LLM-driven summarization.
     {
         let cc_config = ctx.prompt_config.agent.context_compression.clone();
-        let compressor = crate::agent::context_compressor::ContextCompressor::new(
+        let compressor = zeroclaw_runtime::agent::context_compressor::ContextCompressor::new(
             cc_config,
             ctx.context_token_budget,
         )
@@ -2825,7 +2831,7 @@ async fn process_channel_message(
 
     // Partial mode: delta channel for draft updates (progress + text).
     let (delta_tx, delta_rx) = if use_draft_streaming {
-        let (tx, rx) = tokio::sync::mpsc::channel::<crate::agent::loop_::DraftEvent>(64);
+        let (tx, rx) = tokio::sync::mpsc::channel::<zeroclaw_runtime::agent::loop_::DraftEvent>(64);
         (Some(tx), Some(rx))
     } else {
         (None, None)
@@ -2865,7 +2871,7 @@ async fn process_channel_message(
             let reply_target = msg.reply_target.clone();
             let draft_id = draft_id_ref.to_string();
             Some(tokio::spawn(async move {
-                use crate::agent::loop_::DraftEvent;
+                use zeroclaw_runtime::agent::loop_::DraftEvent;
                 let mut accumulated = String::new();
                 while let Some(event) = rx.recv().await {
                     match event {
@@ -2977,7 +2983,10 @@ async fn process_channel_message(
         scale_cap,
     );
     let cost_tracking_context = ctx.cost_tracking.clone().map(|state| {
-        crate::agent::loop_::ToolLoopCostTrackingContext::new(state.tracker, state.prices)
+        zeroclaw_runtime::agent::loop_::ToolLoopCostTrackingContext::new(
+            state.tracker,
+            state.prices,
+        )
     });
     let llm_call_start = Instant::now();
     #[allow(clippy::cast_possible_truncation)]
@@ -2993,7 +3002,7 @@ async fn process_channel_message(
                         msg.interruption_scope_id.clone()
                             .or_else(|| msg.thread_ts.clone())
                             .or_else(|| Some(msg.id.clone())),
-                        crate::agent::loop_::TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
+                        zeroclaw_runtime::agent::loop_::TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
                             cost_tracking_context.clone(),
                         run_tool_call_loop(
                         active_provider.as_ref(),
@@ -3157,7 +3166,7 @@ async fn process_channel_message(
                     )
                     .await
                 {
-                    crate::hooks::HookResult::Cancel(reason) => {
+                    zeroclaw_runtime::hooks::HookResult::Cancel(reason) => {
                         tracing::info!(%reason, "outgoing message suppressed by hook");
                         if let (Some(channel), Some(draft_id)) =
                             (target_channel.as_ref(), draft_message_id.as_deref())
@@ -3166,7 +3175,7 @@ async fn process_channel_message(
                         }
                         return;
                     }
-                    crate::hooks::HookResult::Continue((
+                    zeroclaw_runtime::hooks::HookResult::Continue((
                         hook_channel,
                         hook_recipient,
                         mut modified_content,
@@ -3334,7 +3343,8 @@ async fn process_channel_message(
             }
         }
         LlmExecutionResult::Completed(Ok(Err(e))) => {
-            if crate::agent::loop_::is_tool_loop_cancelled(&e) || cancellation_token.is_cancelled()
+            if zeroclaw_runtime::agent::loop_::is_tool_loop_cancelled(&e)
+                || cancellation_token.is_cancelled()
             {
                 tracing::info!(
                     channel = %msg.channel,
@@ -4151,20 +4161,18 @@ fn build_channel_by_id(config: &Config, channel_id: &str) -> Result<Arc<dyn Chan
                 .irc
                 .as_ref()
                 .context("IRC channel is not configured")?;
-            Ok(Arc::new(IrcChannel::new(
-                zeroclaw_channels::irc::IrcChannelConfig {
-                    server: irc_cfg.server.clone(),
-                    port: irc_cfg.port,
-                    nickname: irc_cfg.nickname.clone(),
-                    username: irc_cfg.username.clone(),
-                    channels: irc_cfg.channels.clone(),
-                    allowed_users: irc_cfg.allowed_users.clone(),
-                    server_password: irc_cfg.server_password.clone(),
-                    nickserv_password: irc_cfg.nickserv_password.clone(),
-                    sasl_password: irc_cfg.sasl_password.clone(),
-                    verify_tls: irc_cfg.verify_tls.unwrap_or(true),
-                },
-            )))
+            Ok(Arc::new(IrcChannel::new(crate::irc::IrcChannelConfig {
+                server: irc_cfg.server.clone(),
+                port: irc_cfg.port,
+                nickname: irc_cfg.nickname.clone(),
+                username: irc_cfg.username.clone(),
+                channels: irc_cfg.channels.clone(),
+                allowed_users: irc_cfg.allowed_users.clone(),
+                server_password: irc_cfg.server_password.clone(),
+                nickserv_password: irc_cfg.nickserv_password.clone(),
+                sasl_password: irc_cfg.sasl_password.clone(),
+                verify_tls: irc_cfg.verify_tls.unwrap_or(true),
+            })))
         }
         "twitter" => {
             let tw = config
@@ -4627,7 +4635,7 @@ fn collect_configured_channels(
         if irc.enabled {
             channels.push(ConfiguredChannel {
                 display_name: "IRC",
-                channel: Arc::new(IrcChannel::new(zeroclaw_channels::irc::IrcChannelConfig {
+                channel: Arc::new(IrcChannel::new(crate::irc::IrcChannelConfig {
                     server: irc.server.clone(),
                     port: irc.port,
                     nickname: irc.nickname.clone(),
@@ -5021,18 +5029,18 @@ pub async fn start_channels(config: Config) -> Result<()> {
     // Instead, a `tool_search` built-in is registered for on-demand loading.
     let mut deferred_section = String::new();
     let mut ch_activated_handle: Option<
-        std::sync::Arc<std::sync::Mutex<crate::tools::ActivatedToolSet>>,
+        std::sync::Arc<std::sync::Mutex<zeroclaw_runtime::tools::ActivatedToolSet>>,
     > = None;
     if config.mcp.enabled && !config.mcp.servers.is_empty() {
         tracing::info!(
             "Initializing MCP client — {} server(s) configured",
             config.mcp.servers.len()
         );
-        match crate::tools::McpRegistry::connect_all(&config.mcp.servers).await {
+        match zeroclaw_runtime::tools::McpRegistry::connect_all(&config.mcp.servers).await {
             Ok(registry) => {
                 let registry = std::sync::Arc::new(registry);
                 if config.mcp.deferred_loading {
-                    let deferred_set = crate::tools::DeferredMcpToolSet::from_registry(
+                    let deferred_set = zeroclaw_runtime::tools::DeferredMcpToolSet::from_registry(
                         std::sync::Arc::clone(&registry),
                     )
                     .await;
@@ -5041,12 +5049,13 @@ pub async fn start_channels(config: Config) -> Result<()> {
                         deferred_set.len(),
                         registry.server_count()
                     );
-                    deferred_section = crate::tools::build_deferred_tools_section(&deferred_set);
+                    deferred_section =
+                        zeroclaw_runtime::tools::build_deferred_tools_section(&deferred_set);
                     let activated = std::sync::Arc::new(std::sync::Mutex::new(
-                        crate::tools::ActivatedToolSet::new(),
+                        zeroclaw_runtime::tools::ActivatedToolSet::new(),
                     ));
                     ch_activated_handle = Some(std::sync::Arc::clone(&activated));
-                    built_tools.push(Box::new(crate::tools::ToolSearchTool::new(
+                    built_tools.push(Box::new(zeroclaw_runtime::tools::ToolSearchTool::new(
                         deferred_set,
                         activated,
                     )));
@@ -5056,7 +5065,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
                     for name in names {
                         if let Some(def) = registry.get_tool_def(&name).await {
                             let wrapper: std::sync::Arc<dyn Tool> =
-                                std::sync::Arc::new(crate::tools::McpToolWrapper::new(
+                                std::sync::Arc::new(zeroclaw_runtime::tools::McpToolWrapper::new(
                                     name,
                                     def,
                                     std::sync::Arc::clone(&registry),
@@ -5064,7 +5073,8 @@ pub async fn start_channels(config: Config) -> Result<()> {
                             if let Some(ref handle) = delegate_handle_ch {
                                 handle.write().push(std::sync::Arc::clone(&wrapper));
                             }
-                            built_tools.push(Box::new(crate::tools::ArcToolRef(wrapper)));
+                            built_tools
+                                .push(Box::new(zeroclaw_runtime::tools::ArcToolRef(wrapper)));
                             registered += 1;
                         }
                     }
@@ -5084,7 +5094,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
 
     let tools_registry = Arc::new(built_tools);
 
-    let skills = crate::skills::load_skills_with_config(&workspace, &config);
+    let skills = zeroclaw_runtime::skills::load_skills_with_config(&workspace, &config);
 
     // ── Load locale-aware tool descriptions ────────────────────────
     let i18n_locale = config
@@ -5092,9 +5102,10 @@ pub async fn start_channels(config: Config) -> Result<()> {
         .as_deref()
         .filter(|s| !s.is_empty())
         .map(ToString::to_string)
-        .unwrap_or_else(crate::i18n::detect_locale);
-    let i18n_search_dirs = crate::i18n::default_search_dirs(&workspace);
-    let i18n_descs = crate::i18n::ToolDescriptions::load(&i18n_locale, &i18n_search_dirs);
+        .unwrap_or_else(zeroclaw_runtime::i18n::detect_locale);
+    let i18n_search_dirs = zeroclaw_runtime::i18n::default_search_dirs(&workspace);
+    let i18n_descs =
+        zeroclaw_runtime::i18n::ToolDescriptions::load(&i18n_locale, &i18n_search_dirs);
 
     // Collect tool descriptions for the prompt
     let mut tool_descs: Vec<(&str, &str)> = vec![
@@ -5255,7 +5266,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
     println!("  Listening for messages... (Ctrl+C to stop)");
     println!();
 
-    crate::health::mark_component_ok("channels");
+    zeroclaw_runtime::health::mark_component_ok("channels");
 
     let initial_backoff_secs = config
         .reliability
@@ -5383,14 +5394,18 @@ pub async fn start_channels(config: Config) -> Result<()> {
         media_pipeline: config.media_pipeline.clone(),
         transcription_config: config.transcription.clone(),
         hooks: if config.hooks.enabled {
-            let mut runner = crate::hooks::HookRunner::new();
+            let mut runner = zeroclaw_runtime::hooks::HookRunner::new();
             if config.hooks.builtin.command_logger {
-                runner.register(Box::new(crate::hooks::builtin::CommandLoggerHook::new()));
+                runner.register(Box::new(
+                    zeroclaw_runtime::hooks::builtin::CommandLoggerHook::new(),
+                ));
             }
             if config.hooks.builtin.webhook_audit.enabled {
-                runner.register(Box::new(crate::hooks::builtin::WebhookAuditHook::new(
-                    config.hooks.builtin.webhook_audit.clone(),
-                )));
+                runner.register(Box::new(
+                    zeroclaw_runtime::hooks::builtin::WebhookAuditHook::new(
+                        config.hooks.builtin.webhook_audit.clone(),
+                    ),
+                ));
             }
             Some(Arc::new(runner))
         } else {
@@ -5419,7 +5434,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
         },
         approval_manager: Arc::new(ApprovalManager::for_non_interactive(&config.autonomy)),
         activated_tools: ch_activated_handle,
-        cost_tracking: crate::cost::CostTracker::get_or_init_global(
+        cost_tracking: zeroclaw_runtime::cost::CostTracker::get_or_init_global(
             config.cost.clone(),
             &config.workspace_dir,
         )
@@ -5510,14 +5525,14 @@ pub async fn start_channels(config: Config) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::observability::NoopObserver;
-    use crate::tools::{Tool, ToolResult};
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tempfile::TempDir;
     use zeroclaw_memory::{Memory, MemoryCategory, SqliteMemory};
     use zeroclaw_providers::{ChatMessage, Provider};
+    use zeroclaw_runtime::observability::NoopObserver;
+    use zeroclaw_runtime::tools::{Tool, ToolResult};
 
     fn make_workspace() -> TempDir {
         let tmp = TempDir::new().unwrap();
@@ -8793,13 +8808,13 @@ BTC is currently around $65,000 based on latest tool output."#
     #[test]
     fn prompt_skills_include_instructions_and_tools() {
         let ws = make_workspace();
-        let skills = vec![crate::skills::Skill {
+        let skills = vec![zeroclaw_runtime::skills::Skill {
             name: "code-review".into(),
             description: "Review code for bugs".into(),
             version: "1.0.0".into(),
             author: None,
             tags: vec![],
-            tools: vec![crate::skills::SkillTool {
+            tools: vec![zeroclaw_runtime::skills::SkillTool {
                 name: "lint".into(),
                 description: "Run static checks".into(),
                 kind: "shell".into(),
@@ -8831,13 +8846,13 @@ BTC is currently around $65,000 based on latest tool output."#
     #[test]
     fn prompt_skills_compact_mode_omits_instructions_but_keeps_tools() {
         let ws = make_workspace();
-        let skills = vec![crate::skills::Skill {
+        let skills = vec![zeroclaw_runtime::skills::Skill {
             name: "code-review".into(),
             description: "Review code for bugs".into(),
             version: "1.0.0".into(),
             author: None,
             tags: vec![],
-            tools: vec![crate::skills::SkillTool {
+            tools: vec![zeroclaw_runtime::skills::SkillTool {
                 name: "lint".into(),
                 description: "Run static checks".into(),
                 kind: "shell".into(),
@@ -8879,13 +8894,13 @@ BTC is currently around $65,000 based on latest tool output."#
     #[test]
     fn prompt_skills_escape_reserved_xml_chars() {
         let ws = make_workspace();
-        let skills = vec![crate::skills::Skill {
+        let skills = vec![zeroclaw_runtime::skills::Skill {
             name: "code<review>&".into(),
             description: "Review \"unsafe\" and 'risky' bits".into(),
             version: "1.0.0".into(),
             author: None,
             tags: vec![],
-            tools: vec![crate::skills::SkillTool {
+            tools: vec![zeroclaw_runtime::skills::SkillTool {
                 name: "run\"linter\"".into(),
                 description: "Run <lint> & report".into(),
                 kind: "shell&exec".into(),
@@ -8948,7 +8963,8 @@ BTC is currently around $65,000 based on latest tool output."#
         let msg = "Hello from ZeroClaw 🌍. Current status is healthy, and café-style UTF-8 text stays safe in logs.";
 
         // Reproduces the production crash path where channel logs truncate at 80 chars.
-        let result = std::panic::catch_unwind(|| crate::util::truncate_with_ellipsis(msg, 80));
+        let result =
+            std::panic::catch_unwind(|| zeroclaw_runtime::util::truncate_with_ellipsis(msg, 80));
         assert!(
             result.is_ok(),
             "truncate_with_ellipsis should never panic on UTF-8"
@@ -8982,7 +8998,7 @@ BTC is currently around $65,000 based on latest tool output."#
     fn full_autonomy_prompt_executes_allowed_tools_without_extra_approval() {
         let ws = make_workspace();
         let config = zeroclaw_config::schema::AutonomyConfig {
-            level: crate::security::AutonomyLevel::Full,
+            level: zeroclaw_runtime::security::AutonomyLevel::Full,
             ..zeroclaw_config::schema::AutonomyConfig::default()
         };
         let prompt = build_system_prompt_with_mode_and_autonomy(
@@ -9013,7 +9029,7 @@ BTC is currently around $65,000 based on latest tool output."#
     fn readonly_prompt_explains_policy_blocks_without_fake_approval() {
         let ws = make_workspace();
         let config = zeroclaw_config::schema::AutonomyConfig {
-            level: crate::security::AutonomyLevel::ReadOnly,
+            level: zeroclaw_runtime::security::AutonomyLevel::ReadOnly,
             ..zeroclaw_config::schema::AutonomyConfig::default()
         };
         let prompt = build_system_prompt_with_mode_and_autonomy(
@@ -9123,7 +9139,7 @@ BTC is currently around $65,000 based on latest tool output."#
             .expect("should produce non-char-boundary data at byte index 120");
 
         observer.record_event(
-            &crate::observability::traits::ObserverEvent::ToolCallStart {
+            &zeroclaw_runtime::observability::traits::ObserverEvent::ToolCallStart {
                 tool: "file_write".to_string(),
                 arguments: Some(payload),
             },
@@ -9451,7 +9467,8 @@ BTC is currently around $65,000 based on latest tool output."#
         config.workspace_dir = workspace.path().to_path_buf();
         config.skills.open_skills_enabled = false;
 
-        let initial_skills = crate::skills::load_skills_with_config(workspace.path(), &config);
+        let initial_skills =
+            zeroclaw_runtime::skills::load_skills_with_config(workspace.path(), &config);
         assert!(initial_skills.is_empty());
 
         let initial_system_prompt = build_system_prompt_with_mode(
@@ -9559,7 +9576,8 @@ BTC is currently around $65,000 based on latest tool output."#
             "---\nname: refresh-test\ndescription: Refresh the available skills section\n---\n# Refresh Test\nExpose this skill after /new.\n",
         )
         .unwrap();
-        let refreshed_skills = crate::skills::load_skills_with_config(workspace.path(), &config);
+        let refreshed_skills =
+            zeroclaw_runtime::skills::load_skills_with_config(workspace.path(), &config);
         assert_eq!(refreshed_skills.len(), 1);
         assert_eq!(refreshed_skills[0].name, "refresh-test");
         assert!(
@@ -10238,7 +10256,7 @@ This is an example JSON object for profile settings."#;
         handle.abort();
         let _ = handle.await;
 
-        let snapshot = crate::health::snapshot_json();
+        let snapshot = zeroclaw_runtime::health::snapshot_json();
         let component = &snapshot["components"]["channel:test-supervised-fail"];
         assert_eq!(component["status"], "error");
         assert!(component["restart_count"].as_u64().unwrap_or(0) >= 1);
@@ -10271,19 +10289,19 @@ This is an example JSON object for profile settings."#;
         );
 
         tokio::time::sleep(Duration::from_millis(35)).await;
-        let first_last_ok =
-            crate::health::snapshot_json()["components"][&component_name]["last_ok"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
+        let first_last_ok = zeroclaw_runtime::health::snapshot_json()["components"]
+            [&component_name]["last_ok"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
         assert!(!first_last_ok.is_empty());
 
         tokio::time::sleep(Duration::from_millis(70)).await;
-        let second_last_ok =
-            crate::health::snapshot_json()["components"][&component_name]["last_ok"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
+        let second_last_ok = zeroclaw_runtime::health::snapshot_json()["components"]
+            [&component_name]["last_ok"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
         let first = chrono::DateTime::parse_from_rfc3339(&first_last_ok)
             .expect("last_ok should be valid RFC3339");
         let second = chrono::DateTime::parse_from_rfc3339(&second_last_ok)

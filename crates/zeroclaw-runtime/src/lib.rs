@@ -1,6 +1,6 @@
-//! Miscellaneous subsystems extracted from the root crate.
-//! Security, observability, gateway, cron, SOP, skills, hardware, and more.
+//! Agent runtime — orchestration, security, observability, cron, SOP, skills, hardware, and more.
 
+pub mod cli_channel_impl;
 pub mod cli_input;
 pub mod i18n;
 pub mod identity;
@@ -9,7 +9,6 @@ pub mod util;
 
 pub mod agent;
 pub mod approval;
-pub mod channels;
 pub mod cost;
 pub mod cron;
 pub mod daemon;

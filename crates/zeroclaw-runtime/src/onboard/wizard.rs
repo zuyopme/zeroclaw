@@ -19,7 +19,8 @@ use zeroclaw_config::schema::{
     DingTalkConfig, IrcConfig, LarkReceiveMode, LinqConfig, NextcloudTalkConfig, QQConfig,
     SignalConfig, StreamMode, WhatsAppConfig,
 };
-#[cfg(feature = "channel-nostr")]
+// TODO: nostr onboarding disabled until zeroclaw-channels provides it
+#[cfg(any())]
 use zeroclaw_config::schema::{NostrConfig, default_nostr_relays};
 use zeroclaw_memory::{
     default_memory_backend_key, memory_backend_profile, selectable_memory_backends,
@@ -3544,7 +3545,8 @@ enum ChannelMenuChoice {
     QqOfficial,
     Lark,
     Feishu,
-    #[cfg(feature = "channel-nostr")]
+    // TODO: nostr onboarding disabled until zeroclaw-channels provides it
+    #[cfg(any())]
     Nostr,
     Done,
 }
@@ -3565,7 +3567,8 @@ const CHANNEL_MENU_CHOICES: &[ChannelMenuChoice] = &[
     ChannelMenuChoice::QqOfficial,
     ChannelMenuChoice::Lark,
     ChannelMenuChoice::Feishu,
-    #[cfg(feature = "channel-nostr")]
+    // TODO: nostr onboarding disabled until zeroclaw-channels provides it
+    #[cfg(any())]
     ChannelMenuChoice::Nostr,
     ChannelMenuChoice::Done,
 ];
@@ -3709,7 +3712,8 @@ fn setup_channels(existing: Option<ChannelsConfig>) -> Result<ChannelsConfig> {
                         "— Feishu Bot"
                     }
                 ),
-                #[cfg(feature = "channel-nostr")]
+                // TODO: nostr onboarding disabled until zeroclaw-channels provides it
+                #[cfg(any())]
                 ChannelMenuChoice::Nostr => format!(
                     "Nostr {}",
                     if config.nostr.is_some() {
@@ -4515,7 +4519,8 @@ fn setup_channels(existing: Option<ChannelsConfig>) -> Result<ChannelsConfig> {
 
                 if mode_idx == 0 {
                     // Compile-time check: warn early if the feature is not enabled.
-                    #[cfg(not(feature = "whatsapp-web"))]
+                    // TODO: whatsapp-web feature moved to zeroclaw-channels
+                    #[cfg(any())]
                     {
                         println!();
                         println!(
@@ -5424,7 +5429,8 @@ fn setup_channels(existing: Option<ChannelsConfig>) -> Result<ChannelsConfig> {
                     proxy_url: existing_lk.and_then(|l| l.proxy_url.clone()),
                 });
             }
-            #[cfg(feature = "channel-nostr")]
+            // TODO: nostr onboarding disabled until zeroclaw-channels provides it
+            #[cfg(any())]
             ChannelMenuChoice::Nostr => {
                 // ── Nostr ──
                 println!();

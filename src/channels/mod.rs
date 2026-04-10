@@ -1,4 +1,4 @@
-pub use zeroclaw_runtime::channels::*;
+pub use zeroclaw_channels::orchestrator::*;
 pub mod session_backend {
     pub use zeroclaw_infra::session_backend::*;
 }

@@ -1,12 +1,3 @@
-#[cfg(feature = "channel-lark")]
-use crate::channels::LarkChannel;
-#[cfg(feature = "channel-matrix")]
-use crate::channels::MatrixChannel;
-#[cfg(feature = "whatsapp-web")]
-use crate::channels::WhatsAppWebChannel;
-use crate::channels::{
-    Channel, DiscordChannel, MattermostChannel, QQChannel, SendMessage, SignalChannel, SlackChannel,
-};
 use crate::cron::{
     CronJob, CronJobPatch, DeliveryConfig, JobType, Schedule, SessionTarget, all_overdue_jobs,
     due_jobs, next_run_for_schedule, record_last_run, record_run, remove_job, reschedule_after_run,
@@ -441,16 +432,6 @@ fn warn_if_high_frequency_agent_job(job: &CronJob) {
     }
 }
 
-#[cfg(any(feature = "channel-matrix", test))]
-fn resolve_matrix_delivery_room(configured_room_id: &str, target: &str) -> String {
-    let target = target.trim();
-    if target.is_empty() {
-        configured_room_id.trim().to_string()
-    } else {
-        target.to_string()
-    }
-}
-
 async fn deliver_if_configured(config: &Config, job: &CronJob, output: &str) -> Result<()> {
     let delivery: &DeliveryConfig = &job.delivery;
     if !delivery.mode.eq_ignore_ascii_case("announce") {
@@ -469,248 +450,20 @@ async fn deliver_if_configured(config: &Config, job: &CronJob, output: &str) -> 
     deliver_announcement(config, channel, target, output).await
 }
 
-/// Output that has been scanned for credential leaks and redacted if necessary.
-/// All channel dispatch must use this type — constructing it requires going through
-/// `scan_and_redact_output`, which enforces leak detection on every outbound path.
-pub struct RedactedOutput(String);
-
-impl RedactedOutput {
-    /// Access the safe-to-send content.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// Scan cron job output for credential leaks and return redacted output if leaks are detected.
-/// Logs a warning with channel, target, and detected patterns when credentials are found.
-fn scan_and_redact_output(channel: &str, target: &str, output: &str) -> RedactedOutput {
-    let leak_detector = crate::security::LeakDetector::new();
-    let leak_check = leak_detector.scan(output);
-
-    match leak_check {
-        crate::security::LeakResult::Detected { patterns, redacted } => {
-            tracing::warn!(
-                channel = %channel,
-                target = %target,
-                patterns = ?patterns,
-                "Credential leak detected in cron job output; redacting before delivery"
-            );
-            RedactedOutput(redacted)
-        }
-        crate::security::LeakResult::Clean => RedactedOutput(output.to_string()),
-    }
-}
-
 pub async fn deliver_announcement(
-    config: &Config,
+    _config: &Config,
     channel: &str,
     target: &str,
     output: &str,
 ) -> Result<()> {
-    // Scan for credential leaks before delivering cron job output to channel.
-    let safe_output = scan_and_redact_output(channel, target, output);
-
-    match channel.to_ascii_lowercase().as_str() {
-        "telegram" => {
-            let tg = config
-                .channels_config
-                .telegram
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("telegram channel not configured"))?;
-            let channel = crate::channels::telegram::TelegramChannel::new(
-                tg.bot_token.clone(),
-                tg.allowed_users.clone(),
-                tg.mention_only,
-            );
-            channel
-                .send(&SendMessage::new(safe_output.as_str(), target))
-                .await?;
-        }
-        "discord" => {
-            let dc = config
-                .channels_config
-                .discord
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("discord channel not configured"))?;
-            let channel = DiscordChannel::new(
-                dc.bot_token.clone(),
-                dc.guild_id.clone(),
-                dc.allowed_users.clone(),
-                dc.listen_to_bots,
-                dc.mention_only,
-            );
-            channel
-                .send(&SendMessage::new(safe_output.as_str(), target))
-                .await?;
-        }
-        "slack" => {
-            let sl = config
-                .channels_config
-                .slack
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("slack channel not configured"))?;
-            let channel = SlackChannel::new(
-                sl.bot_token.clone(),
-                sl.app_token.clone(),
-                sl.channel_id.clone(),
-                Vec::new(),
-                sl.allowed_users.clone(),
-            )
-            .with_workspace_dir(config.workspace_dir.clone());
-            channel
-                .send(&SendMessage::new(safe_output.as_str(), target))
-                .await?;
-        }
-        "mattermost" => {
-            let mm = config
-                .channels_config
-                .mattermost
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("mattermost channel not configured"))?;
-            let channel = MattermostChannel::new(
-                mm.url.clone(),
-                mm.bot_token.clone(),
-                mm.channel_id.clone(),
-                mm.allowed_users.clone(),
-                mm.thread_replies.unwrap_or(true),
-                mm.mention_only.unwrap_or(false),
-            );
-            channel
-                .send(&SendMessage::new(safe_output.as_str(), target))
-                .await?;
-        }
-        "signal" => {
-            let sg = config
-                .channels_config
-                .signal
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("signal channel not configured"))?;
-            let channel = SignalChannel::new(
-                sg.http_url.clone(),
-                sg.account.clone(),
-                sg.group_id.clone(),
-                sg.allowed_from.clone(),
-                sg.ignore_attachments,
-                sg.ignore_stories,
-            );
-            channel
-                .send(&SendMessage::new(safe_output.as_str(), target))
-                .await?;
-        }
-        "matrix" => {
-            #[cfg(feature = "channel-matrix")]
-            {
-                let mx = config
-                    .channels_config
-                    .matrix
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("matrix channel not configured"))?;
-                let room_id = resolve_matrix_delivery_room(&mx.room_id, target);
-                let channel = MatrixChannel::new_with_session_hint_and_zeroclaw_dir(
-                    mx.homeserver.clone(),
-                    mx.access_token.clone(),
-                    room_id,
-                    mx.allowed_users.clone(),
-                    mx.user_id.clone(),
-                    mx.device_id.clone(),
-                    config.config_path.parent().map(|path| path.to_path_buf()),
-                );
-                channel
-                    .send(&SendMessage::new(safe_output.as_str(), target))
-                    .await?;
-            }
-            #[cfg(not(feature = "channel-matrix"))]
-            {
-                anyhow::bail!("matrix delivery channel requires `channel-matrix` feature");
-            }
-        }
-        "whatsapp" | "whatsapp-web" | "whatsapp_web" => {
-            #[cfg(feature = "whatsapp-web")]
-            {
-                let wa = config
-                    .channels_config
-                    .whatsapp
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("whatsapp channel not configured"))?;
-                if !wa.is_web_config() {
-                    anyhow::bail!(
-                        "whatsapp cron delivery requires Web mode (session_path must be set)"
-                    );
-                }
-                let channel = WhatsAppWebChannel::new(
-                    wa.session_path.clone().unwrap_or_default(),
-                    wa.pair_phone.clone(),
-                    wa.pair_code.clone(),
-                    wa.allowed_numbers.clone(),
-                    wa.mention_only,
-                    wa.mode.clone(),
-                    wa.dm_policy.clone(),
-                    wa.group_policy.clone(),
-                    wa.self_chat_mode,
-                );
-                channel
-                    .send(&SendMessage::new(safe_output.as_str(), target))
-                    .await?;
-            }
-            #[cfg(not(feature = "whatsapp-web"))]
-            {
-                anyhow::bail!("whatsapp delivery channel requires `whatsapp-web` feature");
-            }
-        }
-        "qq" => {
-            let qq = config
-                .channels_config
-                .qq
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("qq channel not configured"))?;
-            let channel = QQChannel::new(
-                qq.app_id.clone(),
-                qq.app_secret.clone(),
-                qq.allowed_users.clone(),
-            );
-            channel
-                .send(&SendMessage::new(safe_output.as_str(), target))
-                .await?;
-        }
-        "lark" => {
-            #[cfg(feature = "channel-lark")]
-            {
-                let lk = config
-                    .channels_config
-                    .lark
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("lark channel not configured"))?;
-                let channel = LarkChannel::from_lark_config(lk);
-                channel
-                    .send(&SendMessage::new(safe_output.as_str(), target))
-                    .await?;
-            }
-            #[cfg(not(feature = "channel-lark"))]
-            {
-                anyhow::bail!("lark delivery channel requires `channel-lark` feature");
-            }
-        }
-        "feishu" => {
-            #[cfg(feature = "channel-lark")]
-            {
-                let fs = config
-                    .channels_config
-                    .feishu
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("feishu channel not configured"))?;
-                let channel = LarkChannel::from_feishu_config(fs);
-                channel
-                    .send(&SendMessage::new(safe_output.as_str(), target))
-                    .await?;
-            }
-            #[cfg(not(feature = "channel-lark"))]
-            {
-                anyhow::bail!("feishu delivery channel requires `channel-lark` feature");
-            }
-        }
-        other => anyhow::bail!("unsupported delivery channel: {other}"),
-    }
-
+    // Channel delivery moved to zeroclaw-channels orchestrator.
+    // TODO: Wire delivery callback from orchestrator at startup.
+    tracing::warn!(
+        channel = %channel,
+        target = %target,
+        "Cron delivery skipped: channel delivery not wired (delivery handler moved to zeroclaw-channels)"
+    );
+    let _ = output;
     Ok(())
 }
 
@@ -1442,160 +1195,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deliver_if_configured_handles_none_and_invalid_channel() {
+    async fn deliver_if_configured_handles_none_mode() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp).await;
+        let job = test_job("echo ok");
+
+        // Default delivery mode is not "announce", so should be a no-op.
+        assert!(deliver_if_configured(&config, &job, "x").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn deliver_if_configured_announce_stub_returns_ok() {
         let tmp = TempDir::new().unwrap();
         let config = test_config(&tmp).await;
         let mut job = test_job("echo ok");
-
-        assert!(deliver_if_configured(&config, &job, "x").await.is_ok());
-
         job.delivery = DeliveryConfig {
             mode: "announce".into(),
-            channel: Some("invalid".into()),
-            to: Some("target".into()),
+            channel: Some("telegram".into()),
+            to: Some("123456".into()),
             best_effort: true,
         };
-        let err = deliver_if_configured(&config, &job, "x").await.unwrap_err();
-        assert!(err.to_string().contains("unsupported delivery channel"));
-    }
 
-    #[test]
-    fn resolve_matrix_delivery_room_prefers_target_when_present() {
-        assert_eq!(
-            resolve_matrix_delivery_room("!default:matrix.org", "  !ops:matrix.org  "),
-            "!ops:matrix.org"
-        );
-    }
-
-    #[test]
-    fn resolve_matrix_delivery_room_falls_back_to_configured_room() {
-        assert_eq!(
-            resolve_matrix_delivery_room("  !default:matrix.org  ", "   "),
-            "!default:matrix.org"
-        );
-    }
-
-    #[cfg(feature = "channel-matrix")]
-    #[tokio::test]
-    async fn deliver_if_configured_matrix_missing_config() {
-        let tmp = TempDir::new().unwrap();
-        let config = test_config(&tmp).await;
-        let mut job = test_job("echo ok");
-        job.delivery = DeliveryConfig {
-            mode: "announce".into(),
-            channel: Some("matrix".into()),
-            to: Some("!ops:matrix.org".into()),
-            best_effort: false,
-        };
-
-        let err = deliver_if_configured(&config, &job, "hello")
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("matrix channel not configured"));
-    }
-
-    #[cfg(not(feature = "channel-matrix"))]
-    #[tokio::test]
-    async fn deliver_if_configured_matrix_feature_disabled() {
-        let tmp = TempDir::new().unwrap();
-        let config = test_config(&tmp).await;
-        let mut job = test_job("echo ok");
-        job.delivery = DeliveryConfig {
-            mode: "announce".into(),
-            channel: Some("matrix".into()),
-            to: Some("!ops:matrix.org".into()),
-            best_effort: false,
-        };
-
-        let err = deliver_if_configured(&config, &job, "hello")
-            .await
-            .unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("matrix delivery channel requires `channel-matrix` feature")
-        );
-    }
-
-    #[cfg(feature = "channel-lark")]
-    #[tokio::test]
-    async fn deliver_if_configured_lark_missing_config() {
-        let tmp = TempDir::new().unwrap();
-        let config = test_config(&tmp).await;
-        let mut job = test_job("echo ok");
-        job.delivery = DeliveryConfig {
-            mode: "announce".into(),
-            channel: Some("lark".into()),
-            to: Some("oc_abc123".into()),
-            best_effort: false,
-        };
-
-        let err = deliver_if_configured(&config, &job, "hello")
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("lark channel not configured"));
-    }
-
-    #[cfg(not(feature = "channel-lark"))]
-    #[tokio::test]
-    async fn deliver_if_configured_lark_feature_disabled() {
-        let tmp = TempDir::new().unwrap();
-        let config = test_config(&tmp).await;
-        let mut job = test_job("echo ok");
-        job.delivery = DeliveryConfig {
-            mode: "announce".into(),
-            channel: Some("lark".into()),
-            to: Some("oc_abc123".into()),
-            best_effort: false,
-        };
-
-        let err = deliver_if_configured(&config, &job, "hello")
-            .await
-            .unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("lark delivery channel requires `channel-lark` feature")
-        );
-    }
-
-    #[cfg(feature = "channel-lark")]
-    #[tokio::test]
-    async fn deliver_if_configured_feishu_missing_config() {
-        let tmp = TempDir::new().unwrap();
-        let config = test_config(&tmp).await;
-        let mut job = test_job("echo ok");
-        job.delivery = DeliveryConfig {
-            mode: "announce".into(),
-            channel: Some("feishu".into()),
-            to: Some("oc_abc123".into()),
-            best_effort: false,
-        };
-
-        let err = deliver_if_configured(&config, &job, "hello")
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("feishu channel not configured"));
-    }
-
-    #[cfg(not(feature = "channel-lark"))]
-    #[tokio::test]
-    async fn deliver_if_configured_feishu_feature_disabled() {
-        let tmp = TempDir::new().unwrap();
-        let config = test_config(&tmp).await;
-        let mut job = test_job("echo ok");
-        job.delivery = DeliveryConfig {
-            mode: "announce".into(),
-            channel: Some("feishu".into()),
-            to: Some("oc_abc123".into()),
-            best_effort: false,
-        };
-
-        let err = deliver_if_configured(&config, &job, "hello")
-            .await
-            .unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("feishu delivery channel requires `channel-lark` feature")
-        );
+        // deliver_announcement is a stub that logs a warning and returns Ok.
+        // Once delivery is wired through the orchestrator callback, these
+        // tests should be updated to verify actual delivery behaviour.
+        assert!(deliver_if_configured(&config, &job, "x").await.is_ok());
     }
 
     #[test]

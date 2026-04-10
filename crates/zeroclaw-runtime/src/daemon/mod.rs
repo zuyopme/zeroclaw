@@ -62,6 +62,24 @@ pub struct DaemonSubsystems {
                 + Sync,
         >,
     >,
+    /// Start supervised channels. Injected by the binary when channels crate is available.
+    pub channels_start: Option<
+        Box<
+            dyn Fn(Config) -> std::pin::Pin<Box<dyn Future<Output = Result<()>> + Send>>
+                + Send
+                + Sync,
+        >,
+    >,
+    /// Start the MQTT SOP listener. Injected by the binary when channels crate is available.
+    pub mqtt_start: Option<
+        Box<
+            dyn Fn(
+                    zeroclaw_config::schema::MqttConfig,
+                ) -> std::pin::Pin<Box<dyn Future<Output = Result<()>> + Send>>
+                + Send
+                + Sync,
+        >,
+    >,
 }
 
 pub async fn run(
@@ -109,39 +127,50 @@ pub async fn run(
         ));
     }
 
-    {
+    if let Some(channels_start) = subsystems.channels_start {
         if has_supervised_channels(&config) {
             let channels_cfg = config.clone();
+            let channels_start = std::sync::Arc::new(channels_start);
             handles.push(spawn_component_supervisor(
                 "channels",
                 initial_backoff,
                 max_backoff,
                 move || {
                     let cfg = channels_cfg.clone();
-                    async move { Box::pin(crate::channels::start_channels(cfg)).await }
+                    let start = channels_start.clone();
+                    async move { start(cfg).await }
                 },
             ));
         } else {
             crate::health::mark_component_ok("channels");
             tracing::info!("No real-time channels configured; channel supervisor disabled");
         }
+    } else {
+        crate::health::mark_component_ok("channels");
+        tracing::info!("Channels subsystem not wired; channel supervisor disabled");
     }
 
     // Wire up MQTT SOP listener if configured and enabled
-    if let Some(ref mqtt_config) = config.channels_config.mqtt {
-        if mqtt_config.enabled {
-            let mqtt_cfg = mqtt_config.clone();
-            handles.push(spawn_component_supervisor(
-                "mqtt",
-                initial_backoff,
-                max_backoff,
-                move || {
-                    let cfg = mqtt_cfg.clone();
-                    async move { Box::pin(run_mqtt_sop_listener(&cfg)).await }
-                },
-            ));
+    if let Some(mqtt_start) = subsystems.mqtt_start {
+        if let Some(ref mqtt_config) = config.channels_config.mqtt {
+            if mqtt_config.enabled {
+                let mqtt_cfg = mqtt_config.clone();
+                let mqtt_start = std::sync::Arc::new(mqtt_start);
+                handles.push(spawn_component_supervisor(
+                    "mqtt",
+                    initial_backoff,
+                    max_backoff,
+                    move || {
+                        let cfg = mqtt_cfg.clone();
+                        let start = mqtt_start.clone();
+                        async move { start(cfg).await }
+                    },
+                ));
+            } else {
+                tracing::info!("MQTT channel configured but disabled (enabled = false)");
+                crate::health::mark_component_ok("mqtt");
+            }
         } else {
-            tracing::info!("MQTT channel configured but disabled (enabled = false)");
             crate::health::mark_component_ok("mqtt");
         }
     } else {
@@ -931,22 +960,8 @@ fn has_supervised_channels(config: &Config) -> bool {
         .any(|(_, ok)| *ok)
 }
 
-async fn run_mqtt_sop_listener(config: &zeroclaw_config::schema::MqttConfig) -> Result<()> {
-    use crate::sop::{SopAuditLogger, SopEngine};
-    use std::sync::{Arc, Mutex};
-    use zeroclaw_config::schema::SopConfig;
-    use zeroclaw_memory::NoneMemory;
-
-    // Initialize SOP engine
-    let engine = Arc::new(Mutex::new(SopEngine::new(SopConfig::default())));
-
-    // Initialize SOP audit logger with NoneMemory (MQTT listener is headless)
-    let audit = Arc::new(SopAuditLogger::new(Arc::new(NoneMemory)));
-
-    // Validate MQTT config and run the listener
-    config.validate()?;
-    crate::channels::mqtt::run_mqtt_sop_listener(config, engine, audit).await
-}
+// run_mqtt_sop_listener has been moved to zeroclaw-channels::orchestrator::mqtt.
+// The daemon now receives it as a callback via DaemonSubsystems::mqtt_start.
 
 #[cfg(test)]
 mod tests {

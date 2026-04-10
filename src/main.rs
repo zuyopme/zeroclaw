@@ -1358,6 +1358,28 @@ async fn main() -> Result<()> {
                 })),
                 #[cfg(not(feature = "gateway"))]
                 gateway_start: None,
+                channels_start: Some(Box::new(|config| {
+                    Box::pin(async move {
+                        Box::pin(zeroclaw_channels::orchestrator::start_channels(config)).await
+                    })
+                })),
+                mqtt_start: Some(Box::new(|mqtt_config| {
+                    Box::pin(async move {
+                        use std::sync::{Arc, Mutex};
+                        use zeroclaw_config::schema::SopConfig;
+                        use zeroclaw_memory::NoneMemory;
+                        use zeroclaw_runtime::sop::{SopAuditLogger, SopEngine};
+
+                        let engine = Arc::new(Mutex::new(SopEngine::new(SopConfig::default())));
+                        let audit = Arc::new(SopAuditLogger::new(Arc::new(NoneMemory)));
+                        zeroclaw_channels::orchestrator::mqtt::run_mqtt_sop_listener(
+                            &mqtt_config,
+                            engine,
+                            audit,
+                        )
+                        .await
+                    })
+                })),
             };
             Box::pin(daemon::run(config, host, port, subsystems)).await
         }

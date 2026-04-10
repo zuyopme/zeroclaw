@@ -12,7 +12,6 @@ zeroclaw-infra = { path = "../zeroclaw-infra" }
 zeroclaw-config = { path = "../zeroclaw-config", default-features = false }
 zeroclaw-providers = { path = "../zeroclaw-providers" }
 zeroclaw-memory = { path = "../zeroclaw-memory" }
-zeroclaw-channels = { path = "../zeroclaw-channels", default-features = false }
 zeroclaw-tools = { path = "../zeroclaw-tools" }
 zeroclaw-plugins = { path = "../zeroclaw-plugins", optional = true }
 zeroclaw-tool-call-parser = { path = "../zeroclaw-tool-call-parser" }
@@ -86,15 +85,13 @@ landlock = { version = "0.4", optional = true }
 libc = "0.2"
 
 # Optional deps for specific features
-matrix-sdk = { version = "0.16", optional = true, default-features = false, features = ["e2e-encryption", "rustls-tls", "markdown", "sqlite"] }
-nostr-sdk = { version = "0.44", default-features = false, features = ["nip04", "nip59"], optional = true }
 probe-rs = { version = "0.31", optional = true }
 pdf-extract = { version = "0.10", optional = true }
 nusb = { version = "0.2", default-features = false, optional = true }
 tokio-serial = { version = "5", default-features = false, optional = true }
 
 [features]
-default = ["observability-prometheus", "schema-export", "channel-email", "channel-lark", "channel-discord", "channel-slack", "channel-signal", "channel-mattermost", "channel-irc", "channel-imessage", "channel-dingtalk", "channel-qq", "channel-bluesky", "channel-twitter", "channel-reddit", "channel-notion", "channel-linq", "channel-wati", "channel-nextcloud", "channel-mochat", "channel-wecom", "channel-clawdtalk", "channel-webhook", "channel-acp-server", "channel-whatsapp-cloud", "channel-voice-call"]
+default = ["observability-prometheus", "schema-export"]
 observability-prometheus = ["dep:prometheus"]
 observability-otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
 peripheral-rpi = ["rppal"]
@@ -102,36 +99,6 @@ sandbox-landlock = ["dep:landlock"]
 hardware = ["dep:nusb", "dep:tokio-serial"]
 schema-export = ["dep:schemars", "zeroclaw-config/schema-export"]
 
-# Channel features (forwarded to zeroclaw-channels)
-channel-email = ["zeroclaw-channels/channel-email"]
-channel-telegram = ["zeroclaw-channels/channel-telegram"]
-channel-lark = ["zeroclaw-channels/channel-lark"]
-channel-nostr = ["zeroclaw-channels/channel-nostr", "dep:nostr-sdk"]
-channel-matrix = ["dep:matrix-sdk"]
-channel-discord = ["zeroclaw-channels/channel-discord"]
-channel-slack = ["zeroclaw-channels/channel-slack"]
-channel-signal = ["zeroclaw-channels/channel-signal"]
-channel-mattermost = ["zeroclaw-channels/channel-mattermost"]
-channel-irc = ["zeroclaw-channels/channel-irc"]
-channel-imessage = ["zeroclaw-channels/channel-imessage"]
-channel-dingtalk = ["zeroclaw-channels/channel-dingtalk"]
-channel-qq = ["zeroclaw-channels/channel-qq"]
-channel-bluesky = ["zeroclaw-channels/channel-bluesky"]
-channel-twitter = ["zeroclaw-channels/channel-twitter"]
-channel-reddit = ["zeroclaw-channels/channel-reddit"]
-channel-notion = ["zeroclaw-channels/channel-notion"]
-channel-linq = ["zeroclaw-channels/channel-linq"]
-channel-wati = ["zeroclaw-channels/channel-wati"]
-channel-nextcloud = ["zeroclaw-channels/channel-nextcloud"]
-channel-mochat = ["zeroclaw-channels/channel-mochat"]
-channel-wecom = ["zeroclaw-channels/channel-wecom"]
-channel-clawdtalk = ["zeroclaw-channels/channel-clawdtalk"]
-channel-webhook = ["zeroclaw-channels/channel-webhook"]
-channel-acp-server = []
-channel-whatsapp-cloud = ["zeroclaw-channels/channel-whatsapp-cloud"]
-channel-voice-call = ["zeroclaw-channels/channel-voice-call"]
-whatsapp-web = ["zeroclaw-channels/whatsapp-web"]
-voice-wake = ["zeroclaw-channels/voice-wake"]
 
 browser-native = []
 rag-pdf = ["dep:pdf-extract"]

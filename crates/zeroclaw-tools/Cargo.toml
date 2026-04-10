@@ -11,7 +11,6 @@ zeroclaw-api = { path = "../zeroclaw-api" }
 zeroclaw-config = { path = "../zeroclaw-config" }
 zeroclaw-providers = { path = "../zeroclaw-providers" }
 zeroclaw-memory = { path = "../zeroclaw-memory" }
-zeroclaw-channels = { path = "../zeroclaw-channels" }
 zeroclaw-infra = { path = "../zeroclaw-infra" }
 anyhow = "1.0"
 async-trait = "0.1"

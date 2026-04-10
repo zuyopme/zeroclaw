@@ -1,5 +1,6 @@
-//! Channel implementations for messaging platform integrations.
+//! Channel implementations and orchestration for messaging platform integrations.
 
+pub mod orchestrator;
 pub mod util;
 
 // Always-compiled utilities (no feature gate)

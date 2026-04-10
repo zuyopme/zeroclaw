@@ -2553,7 +2553,7 @@ pub async fn run(
     } else {
         println!("🦀 ZeroClaw Interactive Mode");
         println!("Type /help for commands.\n");
-        let cli = crate::channels::cli::CliChannel::new();
+        let cli = crate::cli_channel_impl::CliChannel::new();
 
         // Persistent conversation history across turns
         let mut history = if let Some(path) = session_state_file.as_deref() {
@@ -2886,7 +2886,7 @@ pub async fn run(
             final_output = response.clone();
             if content_was_streamed.load(std::sync::atomic::Ordering::Relaxed) {
                 println!();
-            } else if let Err(e) = crate::channels::Channel::send(
+            } else if let Err(e) = zeroclaw_api::channel::Channel::send(
                 &cli,
                 &zeroclaw_api::channel::SendMessage::new(format!("\n{response}\n"), "user"),
             )
