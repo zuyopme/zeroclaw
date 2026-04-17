@@ -136,7 +136,7 @@ pub use sop_status::SopStatusTool;
 pub use verifiable_intent::VerifiableIntentTool;
 
 use crate::platform::{NativeRuntime, RuntimeAdapter};
-use crate::security::{SecurityPolicy, create_sandbox};
+use crate::security::{SandboxMounts, SecurityPolicy, create_sandbox};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -301,6 +301,28 @@ pub fn all_tools(
     )
 }
 
+/// Assemble mount points exposed to container-isolating sandboxes.
+///
+/// Inbound Signal attachments get read-only access (the agent can inspect
+/// but not mutate them); the agent outbox is read-write so shell commands
+/// can stage media there before emitting a channel marker. Dirs are
+/// created on demand so Docker doesn't fail the container launch on a
+/// fresh workspace.
+fn build_sandbox_mounts(workspace_dir: &std::path::Path) -> SandboxMounts {
+    let inbound = zeroclaw_api::workspace::signal_inbound_dir(workspace_dir);
+    let outbox = zeroclaw_api::workspace::agent_outbox_dir(workspace_dir);
+    if let Err(e) = std::fs::create_dir_all(&inbound) {
+        tracing::warn!(path = %inbound.display(), error = %e, "failed to prepare signal inbound dir");
+    }
+    if let Err(e) = std::fs::create_dir_all(&outbox) {
+        tracing::warn!(path = %outbox.display(), error = %e, "failed to prepare agent outbox dir");
+    }
+    SandboxMounts {
+        read_only: vec![inbound],
+        read_write: vec![outbox],
+    }
+}
+
 /// Create full tool registry including memory tools and optional Composio.
 #[allow(
     clippy::implicit_hasher,
@@ -331,7 +353,8 @@ pub fn all_tools_with_runtime(
     Option<ChannelMapHandle>,
 ) {
     let has_shell_access = runtime.has_shell_access();
-    let sandbox = create_sandbox(&root_config.security);
+    let sandbox_mounts = build_sandbox_mounts(workspace_dir);
+    let sandbox = create_sandbox(&root_config.security, &sandbox_mounts);
     let mut tool_arcs: Vec<Arc<dyn Tool>> = vec![
         Arc::new(RateLimitedTool::new(
             PathGuardedTool::new(

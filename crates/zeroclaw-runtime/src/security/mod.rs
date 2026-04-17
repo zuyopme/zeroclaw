@@ -51,7 +51,7 @@ pub mod workspace_boundary;
 #[allow(unused_imports)]
 pub use audit::{AuditEvent, AuditEventType, AuditLogger};
 #[allow(unused_imports)]
-pub use detect::create_sandbox;
+pub use detect::{SandboxMounts, create_sandbox};
 pub use domain_matcher::DomainMatcher;
 #[allow(unused_imports)]
 pub use estop::{EstopLevel, EstopManager, EstopState, ResumeSelector};

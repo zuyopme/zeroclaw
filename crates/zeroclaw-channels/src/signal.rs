@@ -9,9 +9,9 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 use zeroclaw_api::channel::{Channel, ChannelMessage, SendMessage};
 use zeroclaw_api::media::MediaAttachment;
+use zeroclaw_api::workspace::SIGNAL_INBOUND_SUBDIR;
 
 const GROUP_TARGET_PREFIX: &str = "group:";
-const SIGNAL_INBOUND_SUBDIR: &str = "signal_inbound";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RecipientTarget {
@@ -722,7 +722,7 @@ impl SignalChannel {
 
     /// Persist an inbound attachment to the workspace directory.
     ///
-    /// Layout: `{workspace_dir}/signal_inbound/{sanitized_id}.{ext}`. The
+    /// Layout: `{workspace_dir}/data/signal_inbound/{sanitized_id}.{ext}`. The
     /// extension is taken from the incoming filename first, then the MIME
     /// type; if neither is known the file is written without an extension.
     /// Returns the absolute path on success or an error when the workspace
@@ -2538,7 +2538,7 @@ mod tests {
 
         let msg = ch.process_envelope_async(&env).await.unwrap();
 
-        // File was written under workspace_dir/signal_inbound/<id>.png.
+        // File was written under workspace_dir/data/signal_inbound/<id>.png.
         let expected_path = tmp.path().join(SIGNAL_INBOUND_SUBDIR).join("att-1.png");
         assert!(expected_path.exists());
         let on_disk = tokio::fs::read(&expected_path).await.unwrap();

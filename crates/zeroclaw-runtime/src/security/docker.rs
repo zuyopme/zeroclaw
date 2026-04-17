@@ -1,18 +1,41 @@
 //! Docker sandbox (container isolation)
 
 use crate::security::traits::Sandbox;
+use std::path::PathBuf;
 use std::process::Command;
+
+/// A host→container mount attached to every `docker run` invocation.
+#[derive(Debug, Clone)]
+pub struct DockerMount {
+    pub host_path: PathBuf,
+    pub container_path: PathBuf,
+    pub writable: bool,
+}
+
+impl DockerMount {
+    fn volume_arg(&self) -> String {
+        let mode = if self.writable { "rw" } else { "ro" };
+        format!(
+            "{}:{}:{}",
+            self.host_path.display(),
+            self.container_path.display(),
+            mode
+        )
+    }
+}
 
 /// Docker sandbox backend
 #[derive(Debug, Clone)]
 pub struct DockerSandbox {
     image: String,
+    mounts: Vec<DockerMount>,
 }
 
 impl Default for DockerSandbox {
     fn default() -> Self {
         Self {
             image: "alpine:latest".to_string(),
+            mounts: Vec::new(),
         }
     }
 }
@@ -31,13 +54,24 @@ impl DockerSandbox {
 
     pub fn with_image(image: String) -> std::io::Result<Self> {
         if Self::is_installed() {
-            Ok(Self { image })
+            Ok(Self {
+                image,
+                mounts: Vec::new(),
+            })
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "Docker not found",
             ))
         }
+    }
+
+    /// Attach a host-path mount that will be added to every container run.
+    /// The caller is responsible for ensuring `host_path` exists; Docker
+    /// will fail the run otherwise.
+    pub fn with_mount(mut self, mount: DockerMount) -> Self {
+        self.mounts.push(mount);
+        self
     }
 
     pub fn probe() -> std::io::Result<Self> {
@@ -72,6 +106,9 @@ impl Sandbox for DockerSandbox {
             "--network",
             "none",
         ]);
+        for mount in &self.mounts {
+            docker_cmd.arg("--volume").arg(mount.volume_arg());
+        }
         docker_cmd.arg(&self.image);
         docker_cmd.arg(&program);
         docker_cmd.args(&args);
@@ -199,6 +236,7 @@ mod tests {
     fn docker_wrap_command_uses_custom_image() {
         let sandbox = DockerSandbox {
             image: "ubuntu:22.04".to_string(),
+            mounts: Vec::new(),
         };
         let mut cmd = Command::new("echo");
         sandbox.wrap_command(&mut cmd).unwrap();
@@ -212,5 +250,48 @@ mod tests {
             args.contains(&"ubuntu:22.04".to_string()),
             "must use the custom image"
         );
+    }
+
+    #[test]
+    fn docker_wrap_command_emits_volume_flags_for_mounts() {
+        let sandbox = DockerSandbox::default()
+            .with_mount(DockerMount {
+                host_path: PathBuf::from("/host/inbound"),
+                container_path: PathBuf::from("/host/inbound"),
+                writable: false,
+            })
+            .with_mount(DockerMount {
+                host_path: PathBuf::from("/host/outbox"),
+                container_path: PathBuf::from("/host/outbox"),
+                writable: true,
+            });
+
+        let mut cmd = Command::new("ls");
+        sandbox.wrap_command(&mut cmd).unwrap();
+
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
+
+        assert!(
+            args.iter().any(|a| a == "/host/inbound:/host/inbound:ro"),
+            "read-only mount flag missing; got args: {args:?}"
+        );
+        assert!(
+            args.iter().any(|a| a == "/host/outbox:/host/outbox:rw"),
+            "read-write mount flag missing; got args: {args:?}"
+        );
+        // The --volume flag must come before the image; otherwise docker
+        // interprets it as a command argument.
+        let image_pos = args.iter().position(|a| a == "alpine:latest").unwrap();
+        let last_volume_pos = args
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, a)| a.as_str() == "--volume")
+            .map(|(i, _)| i)
+            .unwrap();
+        assert!(last_volume_pos < image_pos);
     }
 }

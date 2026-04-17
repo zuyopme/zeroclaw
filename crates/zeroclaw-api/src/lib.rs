@@ -24,6 +24,7 @@ pub mod provider;
 pub mod runtime_traits;
 pub mod schema;
 pub mod tool;
+pub mod workspace;
 
 tokio::task_local! {
     /// Current thread/sender ID for per-sender rate limiting.

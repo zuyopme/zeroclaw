@@ -612,16 +612,17 @@ fn channel_delivery_instructions(channel_name: &str) -> Option<&'static str> {
              - Use Signal's native text formatting: **bold**, *italic* or _italic_, \
                ~~strikethrough~~, ||spoiler||, `monospace`. These render as native styles.\n\
              - To send media, emit a marker with a REAL absolute path or https:// URL — \
-               for example `[IMAGE:/home/user/.zeroclaw/workspace/signal_inbound/abc.jpg]` \
-               or `[IMAGE:https://example.com/cat.png]`. Supported markers: [IMAGE:...], \
-               [VIDEO:...], [AUDIO:...], [VOICE:...], [DOCUMENT:...].\n\
-             - Never emit the literal placeholder text `<path>` or `<path-or-url>` — \
-               substitute the actual path.\n\
-             - Inbound attachments are saved to `<workspace>/signal_inbound/` and injected \
-               into the user's message as `[IMAGE:<absolute-path>]`. To echo an inbound \
-               image back, copy that exact absolute path into your `[IMAGE:...]` marker. \
-               If you've lost the path, list `<workspace>/signal_inbound/` with your file \
-               tools to recover it.\n\
+               for example `[IMAGE:/workspace/data/agent_outbox/cat.png]` or \
+               `[IMAGE:https://example.com/cat.png]`. Supported markers: [IMAGE:...], \
+               [VIDEO:...], [AUDIO:...], [VOICE:...], [DOCUMENT:...]. Never emit the \
+               literal placeholder text `<path>` — substitute the actual path.\n\
+             - Inbound attachments: persisted to `<workspace>/data/signal_inbound/` \
+               (read-only from your shell) and injected into the user's message as \
+               `[IMAGE:<absolute-path>]`. To echo one back, copy the exact absolute \
+               path from that marker into your reply's `[IMAGE:...]` marker.\n\
+             - Outbound media you generate: write files into \
+               `<workspace>/data/agent_outbox/` from your shell (that path is \
+               read-write), then reference them by absolute path in a media marker.\n\
              - Keep normal text outside markers and never wrap markers in code fences.\n\
              - Be concise and direct.\n",
         ),

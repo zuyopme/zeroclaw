@@ -1,11 +1,54 @@
 //! Auto-detection of available security features
 
+use super::docker::{DockerMount, DockerSandbox};
 use crate::security::traits::Sandbox;
 use std::sync::Arc;
 use zeroclaw_config::schema::{SandboxBackend, SecurityConfig};
 
-/// Create a sandbox based on auto-detection or explicit config
-pub fn create_sandbox(config: &SecurityConfig) -> Arc<dyn Sandbox> {
+/// Mounts attached to container-isolating sandboxes. Backends that run the
+/// tool in-process (Landlock, Firejail, Bubblewrap, Seatbelt, Noop) ignore
+/// these — the agent already has host access in those configurations.
+#[derive(Debug, Clone, Default)]
+pub struct SandboxMounts {
+    pub read_only: Vec<std::path::PathBuf>,
+    pub read_write: Vec<std::path::PathBuf>,
+}
+
+impl SandboxMounts {
+    fn docker_mounts(&self) -> Vec<DockerMount> {
+        let mut out = Vec::with_capacity(self.read_only.len() + self.read_write.len());
+        for p in &self.read_only {
+            out.push(DockerMount {
+                host_path: p.clone(),
+                container_path: p.clone(),
+                writable: false,
+            });
+        }
+        for p in &self.read_write {
+            out.push(DockerMount {
+                host_path: p.clone(),
+                container_path: p.clone(),
+                writable: true,
+            });
+        }
+        out
+    }
+}
+
+fn apply_mounts(sandbox: DockerSandbox, mounts: &SandboxMounts) -> DockerSandbox {
+    mounts
+        .docker_mounts()
+        .into_iter()
+        .fold(sandbox, |s, m| s.with_mount(m))
+}
+
+/// Create a sandbox based on auto-detection or explicit config.
+///
+/// `mounts` is consulted only by backends that run the tool command in a
+/// separate namespace/filesystem (currently Docker). Other backends either
+/// already share the host filesystem with the agent or enforce isolation
+/// at a different layer.
+pub fn create_sandbox(config: &SecurityConfig, mounts: &SandboxMounts) -> Arc<dyn Sandbox> {
     let backend = &config.sandbox.backend;
 
     // If explicitly disabled, return noop
@@ -58,8 +101,8 @@ pub fn create_sandbox(config: &SecurityConfig) -> Arc<dyn Sandbox> {
             Arc::new(super::traits::NoopSandbox)
         }
         SandboxBackend::Docker => {
-            if let Ok(sandbox) = super::docker::DockerSandbox::new() {
-                return Arc::new(sandbox);
+            if let Ok(sandbox) = DockerSandbox::new() {
+                return Arc::new(apply_mounts(sandbox, mounts));
             }
             tracing::warn!("Docker requested but not available, falling back to application-layer");
             Arc::new(super::traits::NoopSandbox)
@@ -78,13 +121,13 @@ pub fn create_sandbox(config: &SecurityConfig) -> Arc<dyn Sandbox> {
         }
         SandboxBackend::Auto | SandboxBackend::None => {
             // Auto-detect best available
-            detect_best_sandbox()
+            detect_best_sandbox(mounts)
         }
     }
 }
 
 /// Auto-detect the best available sandbox
-fn detect_best_sandbox() -> Arc<dyn Sandbox> {
+fn detect_best_sandbox(mounts: &SandboxMounts) -> Arc<dyn Sandbox> {
     #[cfg(target_os = "linux")]
     {
         // Try Landlock first (native, no dependencies)
@@ -122,9 +165,9 @@ fn detect_best_sandbox() -> Arc<dyn Sandbox> {
     }
 
     // Docker is heavy but works everywhere if docker is installed
-    if let Ok(sandbox) = super::docker::DockerSandbox::probe() {
+    if let Ok(sandbox) = DockerSandbox::probe() {
         tracing::info!("Docker sandbox enabled");
-        return Arc::new(sandbox);
+        return Arc::new(apply_mounts(sandbox, mounts));
     }
 
     // Fallback: application-layer security only
@@ -135,11 +178,11 @@ fn detect_best_sandbox() -> Arc<dyn Sandbox> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zeroclaw_config::schema::{SandboxConfig, SecurityConfig};
+    use zeroclaw_config::schema::SandboxConfig;
 
     #[test]
     fn detect_best_sandbox_returns_something() {
-        let sandbox = detect_best_sandbox();
+        let sandbox = detect_best_sandbox(&SandboxMounts::default());
         // Should always return at least NoopSandbox
         assert!(sandbox.is_available());
     }
@@ -154,7 +197,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let sandbox = create_sandbox(&config);
+        let sandbox = create_sandbox(&config, &SandboxMounts::default());
         assert_eq!(sandbox.name(), "none");
     }
 
@@ -168,7 +211,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let sandbox = create_sandbox(&config);
+        let sandbox = create_sandbox(&config, &SandboxMounts::default());
         // Should return some sandbox (at least NoopSandbox)
         assert!(sandbox.is_available());
     }
