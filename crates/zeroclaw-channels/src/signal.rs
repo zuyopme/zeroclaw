@@ -842,9 +842,16 @@ impl SignalChannel {
             .rpc_request("getAttachment", params)
             .await?
             .ok_or_else(|| anyhow::anyhow!("getAttachment returned no result"))?;
-        let b64 = result
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("getAttachment result not a string"))?;
+        // signal-cli returns either a bare base64 string or
+        // `{"data": "<base64>"}` depending on version. Handle both.
+        let b64 = match &result {
+            serde_json::Value::String(s) => s.as_str(),
+            serde_json::Value::Object(map) => map
+                .get("data")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("getAttachment object missing 'data' string"))?,
+            _ => anyhow::bail!("getAttachment result not a string or object"),
+        };
         let bytes = base64::engine::general_purpose::STANDARD.decode(b64)?;
         Ok(bytes)
     }
@@ -2089,6 +2096,62 @@ mod tests {
         assert_eq!(msg.attachments[0].file_name, "cat.png");
         assert_eq!(msg.attachments[0].data, b"hello");
         assert_eq!(msg.attachments[0].mime_type.as_deref(), Some("image/png"));
+    }
+
+    #[tokio::test]
+    async fn process_envelope_async_downloads_attachment_object_result() {
+        // signal-cli (current) returns `{"data": "<base64>"}` rather than
+        // a bare base64 string. Regression: the bare-string parser would
+        // silently fail, so ensure the object form is accepted too.
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        let b64 = "aGVsbG8="; // base64("hello")
+        Mock::given(method("POST"))
+            .and(path("/api/v1/rpc"))
+            .and(header("content-type", "application/json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "result": { "data": b64 },
+                "id": "req-1",
+            })))
+            .mount(&server)
+            .await;
+
+        let ch = SignalChannel::new(
+            server.uri(),
+            "+1234567890".to_string(),
+            None,
+            vec!["*".to_string()],
+            false,
+            false,
+        );
+
+        let env = Envelope {
+            source: Some("+1111111111".to_string()),
+            source_number: Some("+1111111111".to_string()),
+            data_message: Some(DataMessage {
+                message: Some("look".to_string()),
+                timestamp: Some(1_700_000_000_000),
+                group_info: None,
+                attachments: Some(vec![SignalAttachment {
+                    content_type: Some("image/png".to_string()),
+                    filename: Some("cat.png".to_string()),
+                    id: Some("att-1".to_string()),
+                }]),
+            }),
+            story_message: None,
+            timestamp: Some(1_700_000_000_000),
+        };
+
+        let msg = ch
+            .process_envelope_async(&env)
+            .await
+            .expect("envelope yields message");
+        assert_eq!(msg.attachments.len(), 1);
+        assert_eq!(msg.attachments[0].data, b"hello");
     }
 
     #[tokio::test]
