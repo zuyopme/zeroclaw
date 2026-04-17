@@ -607,6 +607,19 @@ fn channel_delivery_instructions(channel_name: &str) -> Option<&'static str> {
              - Voice supports .wav, .mp3, .silk formats only. Other audio formats use [DOCUMENT:]\n\
              - Keep normal text outside markers and never wrap markers in code fences.\n",
         ),
+        "signal" => Some(
+            "When responding on Signal:\n\
+             - Use Signal's native text formatting: **bold**, *italic* or _italic_, \
+               ~~strikethrough~~, ||spoiler||, `monospace`. These render as native styles.\n\
+             - For media attachments use markers: [IMAGE:<path-or-url>], [VIDEO:<path-or-url>], \
+               [AUDIO:<path-or-url>], [VOICE:<path-or-url>], [DOCUMENT:<path-or-url>]\n\
+             - Targets can be absolute file paths, workspace-relative paths, or https:// URLs.\n\
+             - Inbound images arrive as [IMAGE:<path>] markers pointing at files in the \
+               workspace's signal_inbound/ directory — read them with your file tools to see \
+               their contents.\n\
+             - Keep normal text outside markers and never wrap markers in code fences.\n\
+             - Be concise and direct.\n",
+        ),
         _ => None,
     }
 }
