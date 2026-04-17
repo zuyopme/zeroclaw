@@ -58,13 +58,39 @@ struct NativeChatRequest<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<SystemPrompt>,
     messages: Vec<NativeMessage>,
-    temperature: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<NativeToolSpec<'a>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
+}
+
+/// Models that reject the `temperature` request field entirely. Claude 4.7
+/// and newer return `400: "`temperature` is deprecated for this model."`
+/// when it's present. The provider silently drops the field for these
+/// models rather than surfacing a cryptic API error to the user; the
+/// configured temperature is still honoured for every other model.
+///
+/// Match by prefix so dated snapshots (e.g. `claude-opus-4-7-20260415`)
+/// are covered. Extend this list when newer generations ship.
+const MODELS_REJECTING_TEMPERATURE: &[&str] = &[
+    "claude-opus-4-7",
+    "claude-sonnet-4-7",
+    "claude-haiku-4-7",
+];
+
+fn temperature_for_model(model: &str, requested: f64) -> Option<f64> {
+    if MODELS_REJECTING_TEMPERATURE
+        .iter()
+        .any(|prefix| model.starts_with(prefix))
+    {
+        None
+    } else {
+        Some(requested)
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -783,7 +809,7 @@ impl Provider for AnthropicProvider {
                     cache_control: None,
                 }],
             }],
-            temperature,
+            temperature: temperature_for_model(model, temperature),
             tools: None,
             tool_choice: None,
             stream: None,
@@ -855,7 +881,7 @@ impl Provider for AnthropicProvider {
             max_tokens: self.max_tokens,
             system: system_prompt,
             messages,
-            temperature,
+            temperature: temperature_for_model(model, temperature),
             tools: native_tools,
             tool_choice,
             stream: None,
@@ -1009,7 +1035,7 @@ impl Provider for AnthropicProvider {
             max_tokens: self.max_tokens,
             system: system_prompt,
             messages,
-            temperature,
+            temperature: temperature_for_model(model, temperature),
             tools: native_tools,
             tool_choice,
             stream: Some(true),
@@ -1277,6 +1303,40 @@ mod tests {
         assert_eq!(resp.content.len(), 2);
         assert_eq!(resp.content[0].text.as_deref(), Some("First"));
         assert_eq!(resp.content[1].text.as_deref(), Some("Second"));
+    }
+
+    #[test]
+    fn temperature_for_model_drops_field_for_4_7_family() {
+        assert!(temperature_for_model("claude-opus-4-7", 0.7).is_none());
+        assert!(temperature_for_model("claude-opus-4-7-20260415", 0.7).is_none());
+        assert!(temperature_for_model("claude-sonnet-4-7", 0.5).is_none());
+        assert!(temperature_for_model("claude-haiku-4-7", 1.0).is_none());
+    }
+
+    #[test]
+    fn temperature_for_model_preserves_value_for_supported_models() {
+        assert_eq!(temperature_for_model("claude-opus-4-6", 0.7), Some(0.7));
+        assert_eq!(temperature_for_model("claude-3-5-sonnet", 0.3), Some(0.3));
+        assert_eq!(temperature_for_model("claude-haiku-4-5", 0.0), Some(0.0));
+    }
+
+    #[test]
+    fn native_request_omits_temperature_key_when_none() {
+        let req = NativeChatRequest {
+            model: "claude-opus-4-7".to_string(),
+            max_tokens: 4096,
+            system: None,
+            messages: vec![],
+            temperature: None,
+            tools: None,
+            tool_choice: None,
+            stream: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(
+            !json.contains("temperature"),
+            "temperature key must be absent on the wire; got: {json}"
+        );
     }
 
     #[test]
@@ -1666,7 +1726,7 @@ mod tests {
                     cache_control: None,
                 }],
             }],
-            temperature: 0.7,
+            temperature: Some(0.7),
             tools: None,
             tool_choice: None,
             stream: None,
