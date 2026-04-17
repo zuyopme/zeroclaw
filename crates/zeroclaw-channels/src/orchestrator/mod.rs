@@ -611,12 +611,17 @@ fn channel_delivery_instructions(channel_name: &str) -> Option<&'static str> {
             "When responding on Signal:\n\
              - Use Signal's native text formatting: **bold**, *italic* or _italic_, \
                ~~strikethrough~~, ||spoiler||, `monospace`. These render as native styles.\n\
-             - For media attachments use markers: [IMAGE:<path-or-url>], [VIDEO:<path-or-url>], \
-               [AUDIO:<path-or-url>], [VOICE:<path-or-url>], [DOCUMENT:<path-or-url>]\n\
-             - Targets can be absolute file paths, workspace-relative paths, or https:// URLs.\n\
-             - Inbound images arrive as [IMAGE:<path>] markers pointing at files in the \
-               workspace's signal_inbound/ directory — read them with your file tools to see \
-               their contents.\n\
+             - To send media, emit a marker with a REAL absolute path or https:// URL — \
+               for example `[IMAGE:/home/user/.zeroclaw/workspace/signal_inbound/abc.jpg]` \
+               or `[IMAGE:https://example.com/cat.png]`. Supported markers: [IMAGE:...], \
+               [VIDEO:...], [AUDIO:...], [VOICE:...], [DOCUMENT:...].\n\
+             - Never emit the literal placeholder text `<path>` or `<path-or-url>` — \
+               substitute the actual path.\n\
+             - Inbound attachments are saved to `<workspace>/signal_inbound/` and injected \
+               into the user's message as `[IMAGE:<absolute-path>]`. To echo an inbound \
+               image back, copy that exact absolute path into your `[IMAGE:...]` marker. \
+               If you've lost the path, list `<workspace>/signal_inbound/` with your file \
+               tools to recover it.\n\
              - Keep normal text outside markers and never wrap markers in code fences.\n\
              - Be concise and direct.\n",
         ),

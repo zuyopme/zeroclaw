@@ -747,7 +747,14 @@ impl SignalChannel {
             .map(|s| s.to_ascii_lowercase())
             .or_else(|| mime.and_then(extension_for_mime).map(str::to_string));
 
-        let stem = sanitize_id_for_filename(id);
+        // signal-cli ids can themselves carry an extension (e.g.
+        // "KK0sj6O2uJDl_2KjLo4m.jpg"); strip it before we append `ext` so
+        // we don't end up with "stem.jpg.jpg" on disk.
+        let stem_source = Path::new(id)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(id);
+        let stem = sanitize_id_for_filename(stem_source);
         let out = match ext {
             Some(ext) => dir.join(format!("{stem}.{ext}")),
             None => dir.join(stem),
@@ -2549,6 +2556,79 @@ mod tests {
         // Raw bytes are still exposed to the media pipeline.
         assert_eq!(msg.attachments.len(), 1);
         assert_eq!(msg.attachments[0].data, b"PNGDATA");
+    }
+
+    #[tokio::test]
+    async fn inbound_attachment_id_with_extension_does_not_duplicate() {
+        // signal-cli ids sometimes carry the extension already (e.g.
+        // "KK0sj6O2uJDl_2KjLo4m.jpg"); the saved path must be
+        // "<stem>.jpg", not "<stem>.jpg.jpg".
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/rpc"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "result": { "data": "UE5H" }, // base64("PNG")
+                "id": "d4",
+            })))
+            .mount(&server)
+            .await;
+
+        let ch = SignalChannel::new(
+            server.uri(),
+            "+1234567890".to_string(),
+            None,
+            vec!["*".to_string()],
+            false,
+            false,
+        )
+        .with_workspace_dir(tmp.path().to_path_buf());
+
+        let env = Envelope {
+            source: Some("+1111111111".to_string()),
+            source_number: Some("+1111111111".to_string()),
+            data_message: Some(DataMessage {
+                message: Some("see".to_string()),
+                timestamp: Some(1_700_000_000_000),
+                group_info: None,
+                attachments: Some(vec![SignalAttachment {
+                    content_type: Some("image/jpeg".to_string()),
+                    filename: Some("photo.jpg".to_string()),
+                    id: Some("AbCdEf12.jpg".to_string()),
+                }]),
+            }),
+            story_message: None,
+            timestamp: Some(1_700_000_000_000),
+        };
+
+        let msg = ch.process_envelope_async(&env).await.unwrap();
+
+        let expected_path = tmp
+            .path()
+            .join(SIGNAL_INBOUND_SUBDIR)
+            .join("AbCdEf12.jpg");
+        assert!(
+            expected_path.exists(),
+            "expected single-extension path {:?} not found; listing: {:?}",
+            expected_path,
+            std::fs::read_dir(tmp.path().join(SIGNAL_INBOUND_SUBDIR))
+                .map(|rd| rd
+                    .filter_map(Result::ok)
+                    .map(|e| e.file_name())
+                    .collect::<Vec<_>>()),
+        );
+        let bogus = tmp
+            .path()
+            .join(SIGNAL_INBOUND_SUBDIR)
+            .join("AbCdEf12.jpg.jpg");
+        assert!(!bogus.exists(), "double-extension path should not exist");
+        assert!(msg
+            .content
+            .contains(&format!("[IMAGE:{}]", expected_path.display())));
     }
 
     #[tokio::test]
