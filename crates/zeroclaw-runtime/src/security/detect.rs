@@ -5,13 +5,17 @@ use crate::security::traits::Sandbox;
 use std::sync::Arc;
 use zeroclaw_config::schema::{SandboxBackend, SecurityConfig};
 
-/// Mounts attached to container-isolating sandboxes. Backends that run the
-/// tool in-process (Landlock, Firejail, Bubblewrap, Seatbelt, Noop) ignore
-/// these — the agent already has host access in those configurations.
+/// Mounts (and related file-system hints) attached to container-isolating
+/// sandboxes. Backends that run the tool in-process (Landlock, Firejail,
+/// Bubblewrap, Seatbelt, Noop) ignore these — the agent already shares the
+/// host filesystem in those configurations.
 #[derive(Debug, Clone, Default)]
 pub struct SandboxMounts {
     pub read_only: Vec<std::path::PathBuf>,
     pub read_write: Vec<std::path::PathBuf>,
+    /// When set, the Docker backend writes a declarative compose file here
+    /// and launches tool commands via `docker compose run`.
+    pub compose_path: Option<std::path::PathBuf>,
 }
 
 impl SandboxMounts {
@@ -35,11 +39,15 @@ impl SandboxMounts {
     }
 }
 
-fn apply_mounts(sandbox: DockerSandbox, mounts: &SandboxMounts) -> DockerSandbox {
-    mounts
+fn configure_docker(sandbox: DockerSandbox, mounts: &SandboxMounts) -> DockerSandbox {
+    let mut sb = mounts
         .docker_mounts()
         .into_iter()
-        .fold(sandbox, |s, m| s.with_mount(m))
+        .fold(sandbox, |s, m| s.with_mount(m));
+    if let Some(path) = mounts.compose_path.as_ref() {
+        sb = sb.with_compose_path(path.clone());
+    }
+    sb
 }
 
 /// Create a sandbox based on auto-detection or explicit config.
@@ -102,7 +110,7 @@ pub fn create_sandbox(config: &SecurityConfig, mounts: &SandboxMounts) -> Arc<dy
         }
         SandboxBackend::Docker => {
             if let Ok(sandbox) = DockerSandbox::new() {
-                return Arc::new(apply_mounts(sandbox, mounts));
+                return Arc::new(configure_docker(sandbox, mounts));
             }
             tracing::warn!("Docker requested but not available, falling back to application-layer");
             Arc::new(super::traits::NoopSandbox)
@@ -167,7 +175,7 @@ fn detect_best_sandbox(mounts: &SandboxMounts) -> Arc<dyn Sandbox> {
     // Docker is heavy but works everywhere if docker is installed
     if let Ok(sandbox) = DockerSandbox::probe() {
         tracing::info!("Docker sandbox enabled");
-        return Arc::new(apply_mounts(sandbox, mounts));
+        return Arc::new(configure_docker(sandbox, mounts));
     }
 
     // Fallback: application-layer security only

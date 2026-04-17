@@ -320,6 +320,7 @@ fn build_sandbox_mounts(workspace_dir: &std::path::Path) -> SandboxMounts {
     SandboxMounts {
         read_only: vec![inbound],
         read_write: vec![outbox],
+        compose_path: Some(workspace_dir.join("sandbox.compose.yml")),
     }
 }
 
