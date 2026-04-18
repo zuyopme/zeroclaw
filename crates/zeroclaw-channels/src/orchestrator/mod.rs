@@ -2228,6 +2228,41 @@ fn is_tool_call_payload(value: &serde_json::Value, known_tool_names: &HashSet<St
     has_args && known_tool_names.contains(&name.to_ascii_lowercase())
 }
 
+/// Lenient version of [`is_tool_call_payload`] that only checks structural
+/// shape and ignores the tool registry. Used as a safety-net when the model
+/// emits a tool-call-shaped JSON blob as plain text with an unregistered or
+/// hallucinated tool name — we still want to strip it from user-facing output.
+fn looks_like_tool_call_shape(value: &serde_json::Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+
+    let (name, has_args) =
+        if let Some(function) = object.get("function").and_then(|f| f.as_object()) {
+            (
+                function
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| object.get("name").and_then(|v| v.as_str())),
+                function.contains_key("arguments")
+                    || function.contains_key("parameters")
+                    || object.contains_key("arguments")
+                    || object.contains_key("parameters"),
+            )
+        } else {
+            (
+                object.get("name").and_then(|v| v.as_str()),
+                object.contains_key("arguments") || object.contains_key("parameters"),
+            )
+        };
+
+    let Some(name) = name.map(str::trim).filter(|name| !name.is_empty()) else {
+        return false;
+    };
+
+    has_args && !name.is_empty()
+}
+
 fn is_tool_result_payload(
     object: &serde_json::Map<String, serde_json::Value>,
     saw_tool_call_payload: bool,
@@ -2266,11 +2301,16 @@ fn sanitize_tool_json_value(
 
     let object = value.as_object()?;
 
+    // An assistant-message envelope like `{"content": ..., "tool_calls": [...]}`
+    // is almost never legitimate prose — it's the OpenAI-style assistant turn
+    // shape that the model sometimes leaks as plain text when framing wobbles
+    // (e.g. after a failed tool-call retry). Strip the wrapper even when the
+    // inner tool name is unknown/hallucinated, preserving any `content` string.
     if let Some(tool_calls) = object.get("tool_calls").and_then(|value| value.as_array())
         && !tool_calls.is_empty()
-        && tool_calls
-            .iter()
-            .all(|call| is_tool_call_payload(call, known_tool_names))
+        && tool_calls.iter().all(|call| {
+            is_tool_call_payload(call, known_tool_names) || looks_like_tool_call_shape(call)
+        })
     {
         let content = object
             .get("content")
@@ -10201,6 +10241,40 @@ Done reminder set for 1:38 AM."#;
             normalized,
             "Let me create the reminder properly:\nDone reminder set for 1:38 AM."
         );
+    }
+
+    #[test]
+    fn strip_isolated_tool_json_artifacts_removes_envelope_with_unregistered_tool() {
+        // The model can leak an OpenAI-style assistant envelope
+        // (`{"content": ..., "tool_calls": [...]}`) as plain text when framing
+        // wobbles. Even when the inner tool name isn't in the registry — e.g.
+        // the model hallucinated `fetch_image` — strip the wrapper but keep
+        // the visible `content` string.
+        let known_tools: HashSet<String> = HashSet::new();
+
+        let input = r#"{"content":"Here's the image you asked for:","tool_calls":[{"name":"fetch_image","arguments":{"url":"https://example.com/a.png"}}]}"#;
+
+        let result = strip_isolated_tool_json_artifacts(input, &known_tools);
+        assert_eq!(result, "Here's the image you asked for:");
+    }
+
+    #[test]
+    fn strip_isolated_tool_json_artifacts_envelope_with_null_content_leaves_empty() {
+        // Same envelope but `content: null` — the wrapper should be stripped
+        // entirely, leaving the surrounding prose intact.
+        let known_tools: HashSet<String> = HashSet::new();
+
+        let input = r#"ok let me look:
+{"content":null,"tool_calls":[{"id":"x","name":"shell","arguments":"{\"cmd\":\"ls\"}"}]}
+all done"#;
+
+        let result = strip_isolated_tool_json_artifacts(input, &known_tools);
+        let normalized = result
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(normalized, "ok let me look:\nall done");
     }
 
     #[test]
